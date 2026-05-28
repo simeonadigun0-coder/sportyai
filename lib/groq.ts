@@ -3,13 +3,7 @@ import { SportyBetGame } from './sportybet'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
-export interface GameAnalysis {
-  eventId: string
-  homeTeam: string
-  awayTeam: string
-  odds: number
-  pick: string
-  league: string
+export interface GameAnalysis extends SportyBetGame {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   riskScore: number
   reason: string
@@ -47,7 +41,7 @@ Please search the web for:
 2. Any injury or suspension news
 3. Head-to-head record between these teams
 4. Home/away performance this season
-5. Any other relevant news (manager changes, motivation, etc)
+5. Any other relevant news
 
 Based on your research, provide:
 - A risk score from 1-10 (1=very safe, 10=very risky)
@@ -82,7 +76,6 @@ Respond ONLY in this exact JSON format (no markdown, no extra text):
       formSummary: result.formSummary || 'No form data available',
     }
   } catch {
-    // Fallback if compound-beta fails
     const riskScore = Math.min(10, Math.round(game.odds * 1.2))
     return {
       riskScore,
@@ -93,21 +86,13 @@ Respond ONLY in this exact JSON format (no markdown, no extra text):
   }
 }
 
-function selectBestCombination(
-  games: GameAnalysis[],
-  targetOdds: number
-): GameAnalysis[] {
-  // Sort by risk score ascending (safest first)
+function selectBestCombination(games: GameAnalysis[], targetOdds: number): GameAnalysis[] {
   const sorted = [...games].sort((a, b) => a.riskScore - b.riskScore)
-
-  // Try to find the best combo that gets close to target
   let kept = [...sorted]
 
-  // Remove riskiest games until we're at or below target
   while (kept.length > 2) {
     const currentOdds = kept.reduce((acc, g) => acc * g.odds, 1)
-    if (currentOdds <= targetOdds * 1.3) break // within 30% of target
-    // Remove the highest risk game
+    if (currentOdds <= targetOdds * 1.3) break
     kept = kept.slice(0, kept.length - 1)
   }
 
@@ -120,36 +105,29 @@ export async function analyseSlip(
   originalTotalOdds: number
 ): Promise<SlipAnalysis> {
 
-  // Analyse each game individually with web search
-  const analysisResults = await Promise.all(
+  // Analyse all games in parallel for speed
+  const analysisResults: GameAnalysis[] = await Promise.all(
     games.map(async (game) => {
       const analysis = await analyseOneGame(game)
       return {
-        eventId: game.eventId,
-        homeTeam: game.homeTeam,
-        awayTeam: game.awayTeam,
-        odds: game.odds,
-        pick: game.pick,
-        league: game.league,
+        // Spread ALL original game fields — this preserves marketId, outcomeId, specifier
+        ...game,
         riskLevel: analysis.riskLevel,
         riskScore: analysis.riskScore,
         reason: analysis.reason,
         formSummary: analysis.formSummary,
-        keep: true, // will be set below
-      } as GameAnalysis
+        keep: true,
+      }
     })
   )
 
-  // Decide which games to keep based on target odds
   const currentOdds = analysisResults.reduce((acc, g) => acc * g.odds, 1)
 
   let keptGames: GameAnalysis[]
 
   if (currentOdds <= targetOdds * 1.5) {
-    // Already close to or below target - keep all
     keptGames = analysisResults
   } else {
-    // Need to reduce - select best combination
     keptGames = selectBestCombination(analysisResults, targetOdds)
   }
 
@@ -163,16 +141,16 @@ export async function analyseSlip(
   const removedGames = finalGames.filter(g => !g.keep)
   const newOdds = keptGames.reduce((acc, g) => acc * g.odds, 1)
 
-  // Generate overall summary
-  const summaryPrompt = `Summarise this bet slip analysis in 2 sentences for a Nigerian punter:
+  // Summary
+  let summary = 'Analysis complete.'
+  try {
+    const summaryPrompt = `Summarise this bet slip analysis in 2 sentences for a Nigerian punter:
 - Original: ${games.length} games, ${originalTotalOdds} total odds
 - Removed: ${removedGames.map(g => `${g.homeTeam} vs ${g.awayTeam} (${g.reason})`).join(', ') || 'none'}
 - Kept: ${keptGames.length} games, ${newOdds.toFixed(2)} odds
 - Target was: ${targetOdds} odds
 Be direct and friendly.`
 
-  let summary = 'Analysis complete.'
-  try {
     const summaryCompletion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: summaryPrompt }],
