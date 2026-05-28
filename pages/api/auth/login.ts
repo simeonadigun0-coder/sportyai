@@ -14,11 +14,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!user || !verifyPassword(user, password))
     return res.status(401).json({ error: 'Invalid email or password' })
 
-  const token = signToken({ userId: user.id, username: user.username, email: user.email })
+  if (user.status === 'pending')
+    return res.status(403).json({
+      error: 'Your account is pending admin approval. Please check back later.',
+      pending: true,
+    })
 
+  if (user.status === 'rejected')
+    return res.status(403).json({ error: 'Your account has been rejected. Contact admin for help.' })
+
+  const token = signToken({ userId: user.id, username: user.username, email: user.email })
   res.setHeader('Set-Cookie', `token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`)
   return res.status(200).json({
     token,
-    user: { id: user.id, username: user.username, email: user.email },
+    user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin },
   })
 }
