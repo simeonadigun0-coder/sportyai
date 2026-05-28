@@ -7,27 +7,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { username, email, password } = req.body
 
-  if (!username || !email || !password) {
+  if (!username || !email || !password)
     return res.status(400).json({ error: 'Username, email and password are required' })
-  }
 
-  if (password.length < 6) {
+  if (password.length < 6)
     return res.status(400).json({ error: 'Password must be at least 6 characters' })
-  }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     return res.status(400).json({ error: 'Invalid email address' })
-  }
 
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email))
     return res.status(409).json({ error: 'Email already registered' })
-  }
 
-  if (findUserByUsername(username)) {
+  if (await findUserByUsername(username))
     return res.status(409).json({ error: 'Username already taken' })
-  }
 
-  const user = createUser(username.trim(), email.toLowerCase().trim(), password)
+  const user = await createUser(username.trim(), email.toLowerCase().trim(), password)
   const token = signToken({ userId: user.id, username: user.username, email: user.email })
 
   res.setHeader('Set-Cookie', `token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`)

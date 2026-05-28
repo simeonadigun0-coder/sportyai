@@ -1,9 +1,7 @@
-import fs from 'fs'
-import path from 'path'
+import { Redis } from '@upstash/redis'
 import bcrypt from 'bcryptjs'
 
-const DATA_DIR = path.join(process.cwd(), 'data')
-const USERS_FILE = path.join(DATA_DIR, 'users.json')
+const redis = Redis.fromEnv()
 
 export interface User {
   id: string
@@ -13,36 +11,17 @@ export interface User {
   createdAt: string
 }
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true })
-  }
-  if (!fs.existsSync(USERS_FILE)) {
-    fs.writeFileSync(USERS_FILE, JSON.stringify([]))
-  }
+export async function findUserByEmail(email: string): Promise<User | undefined> {
+  const user = await redis.get<User>(`user:email:${email.toLowerCase()}`)
+  return user || undefined
 }
 
-export function getUsers(): User[] {
-  ensureDataDir()
-  const raw = fs.readFileSync(USERS_FILE, 'utf-8')
-  return JSON.parse(raw)
+export async function findUserByUsername(username: string): Promise<User | undefined> {
+  const user = await redis.get<User>(`user:username:${username.toLowerCase()}`)
+  return user || undefined
 }
 
-function saveUsers(users: User[]) {
-  ensureDataDir()
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2))
-}
-
-export function findUserByEmail(email: string): User | undefined {
-  return getUsers().find(u => u.email.toLowerCase() === email.toLowerCase())
-}
-
-export function findUserByUsername(username: string): User | undefined {
-  return getUsers().find(u => u.username.toLowerCase() === username.toLowerCase())
-}
-
-export function createUser(username: string, email: string, password: string): User {
-  const users = getUsers()
+export async function createUser(username: string, email: string, password: string): Promise<User> {
   const passwordHash = bcrypt.hashSync(password, 10)
   const user: User = {
     id: Date.now().toString(),
@@ -51,8 +30,8 @@ export function createUser(username: string, email: string, password: string): U
     passwordHash,
     createdAt: new Date().toISOString(),
   }
-  users.push(user)
-  saveUsers(users)
+  await redis.set(`user:email:${email.toLowerCase()}`, user)
+  await redis.set(`user:username:${username.toLowerCase()}`, user)
   return user
 }
 

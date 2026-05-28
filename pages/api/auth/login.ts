@@ -7,14 +7,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { email, password } = req.body
 
-  if (!email || !password) {
+  if (!email || !password)
     return res.status(400).json({ error: 'Email and password are required' })
-  }
 
-  const user = findUserByEmail(email)
-  if (!user || !verifyPassword(user, password)) {
+  const user = await findUserByEmail(email)
+  if (!user || !verifyPassword(user, password))
     return res.status(401).json({ error: 'Invalid email or password' })
-  }
 
   const token = signToken({ userId: user.id, username: user.username, email: user.email })
 
