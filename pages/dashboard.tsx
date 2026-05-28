@@ -125,10 +125,8 @@ export default function Dashboard() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to decode')
-      
-      const parsed = parseSlipFromRaw(data.rawResponse)
-      if (!parsed.games.length) throw new Error('No games found in this booking code')
-      setSlip(parsed)
+      if (!data.games?.length) throw new Error('No games found in this booking code')
+      setSlip(data)
       setStep('decoded')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to decode')

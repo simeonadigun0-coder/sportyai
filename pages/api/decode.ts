@@ -26,21 +26,89 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })
 
     const text = await response.text()
-    
-    // Parse the full JSON properly
     const data = JSON.parse(text)
 
+    if (!data || data.bizCode !== 10000) {
+      return res.status(400).json({ error: data?.message || 'Invalid booking code' })
+    }
+
+    const outcomes: unknown[] = data.data?.outcomes || []
+    const selections: unknown[] = data.data?.ticket?.selections || []
+    const displayTotalOdds = parseFloat(data.data?.ticket?.displayTotalOdds || '1')
+    const shareCode = data.data?.shareCode || cleanCode
+
+    if (!outcomes.length) {
+      return res.status(400).json({ error: 'No games found in this booking code' })
+    }
+
+    const games = outcomes.map((item: unknown, index: number) => {
+      const g = item as Record<string, unknown>
+      
+      // Get the EXACT original selection for this game
+      const sel = (selections[index] || {}) as Record<string, unknown>
+      const exactEventId = String(sel.eventId || g.eventId || index)
+      const exactMarketId = String(sel.marketId || '1')
+      const exactOutcomeId = String(sel.outcomeId || '1')
+      const exactSpecifier = (sel.specifier as string | null) || null
+
+      const sport = g.sport as Record<string, unknown>
+      const sportName = (sport?.name as string) || 'Football'
+      const category = sport?.category as Record<string, unknown>
+      const tournament = category?.tournament as Record<string, unknown>
+      const league = (tournament?.name as string) || ''
+      const markets = (g.markets as unknown[]) || []
+
+      let odds = 1
+      let pick = ''
+      let market = '1X2'
+
+      if (markets.length > 0) {
+        const firstMarket = markets[0] as Record<string, unknown>
+        market = (firstMarket.desc as string) || '1X2'
+
+        const outs = (firstMarket.outcomes as unknown[]) || []
+
+        // Match the EXACT outcomeId from the original selection
+        const matched = outs.find((o: unknown) => {
+          const oc = o as Record<string, unknown>
+          return String(oc.id) === exactOutcomeId
+        }) as Record<string, unknown> | undefined
+
+        if (matched) {
+          odds = parseFloat(String(matched.odds || 1))
+          pick = (matched.desc as string) || ''
+        } else if (outs.length > 0) {
+          const first = outs[0] as Record<string, unknown>
+          odds = parseFloat(String(first.odds || 1))
+          pick = (first.desc as string) || ''
+        }
+      }
+
+      return {
+        eventId: exactEventId,
+        homeTeam: (g.homeTeamName as string) || 'Home',
+        awayTeam: (g.awayTeamName as string) || 'Away',
+        market,
+        marketId: exactMarketId,
+        outcomeId: exactOutcomeId,
+        specifier: exactSpecifier,
+        pick,
+        odds,
+        kickoffTime: String(g.estimateStartTime || ''),
+        league,
+        sport: sportName,
+      }
+    })
+
     return res.status(200).json({
-      httpStatus: response.status,
-      url,
-      rawResponse: text,
-      parsed: data,
+      shareCode,
+      totalOdds: parseFloat(displayTotalOdds.toFixed(2)),
+      games,
     })
 
   } catch (err) {
     return res.status(400).json({
-      error: err instanceof Error ? err.message : 'fetch failed',
-      url,
+      error: err instanceof Error ? err.message : 'Failed to decode booking code',
     })
   }
 }

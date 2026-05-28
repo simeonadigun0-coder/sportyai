@@ -19,11 +19,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ code: newCode })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to generate booking code'
-    // Provide a fallback message if SportyBet rebooking fails
-    return res.status(500).json({
-      error: message,
-      fallback: true,
-      message: 'Could not auto-generate code. You can manually load the selected games on SportyBet.',
-    })
+    return res.status(500).json({ error: message })
   }
 }
