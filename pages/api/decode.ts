@@ -26,16 +26,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })
 
     const text = await response.text()
+    
+    // Parse the full JSON properly
+    const data = JSON.parse(text)
 
-    // Return everything raw so we can see exactly what SportyBet returns
     return res.status(200).json({
       httpStatus: response.status,
       url,
-      rawResponse: text.substring(0, 3000),
+      rawResponse: text,
+      parsed: data,
     })
 
   } catch (err) {
-    return res.status(200).json({
+    return res.status(400).json({
       error: err instanceof Error ? err.message : 'fetch failed',
       url,
     })
