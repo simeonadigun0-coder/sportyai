@@ -25,48 +25,70 @@ const HEADERS = {
   'Accept': 'application/json, text/plain, */*',
   'Accept-Language': 'en-US,en;q=0.9',
   'Origin': 'https://www.sportybet.com',
-  'Referer': `https://www.sportybet.com/${COUNTRY}/`,
+  'Referer': 'https://www.sportybet.com/ng/sport/football',
+  'x-requested-with': 'XMLHttpRequest',
 }
 
 export async function decodeBookingCode(shareCode: string): Promise<SportyBetSlip> {
-  const url = `${BASE}/factsCenter/publicShareCode?shareCode=${shareCode.toUpperCase().trim()}`
+  const cleanCode = shareCode.toUpperCase().trim()
 
-  const res = await fetch(url, { headers: HEADERS })
+  const urlsToTry = [
+    `${BASE}/factsCenter/publicShareCode?shareCode=${cleanCode}&_t=${Date.now()}`,
+    `https://www.sportybet.com/api/ng/factsCenter/publicShareCode?shareCode=${cleanCode}`,
+    `https://www.sportybet.com/ng/api/factsCenter/publicShareCode?shareCode=${cleanCode}`,
+  ]
 
-  if (!res.ok) {
-    throw new Error(`SportyBet API error: ${res.status} ${res.statusText}`)
+  let lastError = ''
+
+  for (const url of urlsToTry) {
+    try {
+      const res = await fetch(url, { headers: HEADERS })
+
+      if (!res.ok) {
+        lastError = `SportyBet API error: ${res.status} ${res.statusText}`
+        continue
+      }
+
+      const data = await res.json()
+
+      if (!data || data.bizCode !== 0) {
+        lastError = data?.message || 'Invalid booking code or code not found'
+        continue
+      }
+
+      const outcomeList: unknown[] = data.data?.betInfoData?.betInfoList || []
+
+      if (!outcomeList.length) {
+        lastError = 'No games found in this booking code'
+        continue
+      }
+
+      const games: SportyBetGame[] = outcomeList.map((item: unknown) => {
+        const g = item as Record<string, unknown>
+        const sport = (g.sport as string) || 'Football'
+        const homeTeam = (g.homeTeamName as string) || (g.homeName as string) || 'Home'
+        const awayTeam = (g.awayTeamName as string) || (g.awayName as string) || 'Away'
+        const market = (g.marketName as string) || (g.bet as string) || '1X2'
+        const pick = (g.outcomeName as string) || (g.pick as string) || ''
+        const odds = parseFloat(String(g.odds || g.outcomeOdds || 1))
+        const kickoffTime = (g.matchTime as string) || (g.kickoffTime as string) || ''
+        const league = (g.tournamentName as string) || (g.league as string) || ''
+        const eventId = String(g.eventId || g.matchId || g.id || Math.random())
+
+        return { eventId, homeTeam, awayTeam, market, pick, odds, kickoffTime, league, sport }
+      })
+
+      const totalOdds = games.reduce((acc, g) => acc * g.odds, 1)
+
+      return { shareCode: cleanCode, totalOdds: parseFloat(totalOdds.toFixed(2)), games, raw: data }
+
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : 'Network error'
+      continue
+    }
   }
 
-  const data = await res.json()
-
-  if (!data || data.bizCode !== 0) {
-    throw new Error(data?.message || 'Invalid booking code or code not found')
-  }
-
-  const outcomeList: unknown[] = data.data?.betInfoData?.betInfoList || []
-
-  if (!outcomeList.length) {
-    throw new Error('No games found in this booking code')
-  }
-
-  const games: SportyBetGame[] = outcomeList.map((item: unknown) => {
-    const g = item as Record<string, unknown>
-    const sport = (g.sport as string) || 'Football'
-    const homeTeam = (g.homeTeamName as string) || (g.homeName as string) || 'Home'
-    const awayTeam = (g.awayTeamName as string) || (g.awayName as string) || 'Away'
-    const market = (g.marketName as string) || (g.bet as string) || '1X2'
-    const pick = (g.outcomeName as string) || (g.pick as string) || ''
-    const odds = parseFloat(String(g.odds || g.outcomeOdds || 1))
-    const kickoffTime = (g.matchTime as string) || (g.kickoffTime as string) || ''
-    const league = (g.tournamentName as string) || (g.league as string) || ''
-    const eventId = String(g.eventId || g.matchId || g.id || Math.random())
-
-    return { eventId, homeTeam, awayTeam, market, pick, odds, kickoffTime, league, sport }
-  })
-
-  const totalOdds = games.reduce((acc, g) => acc * g.odds, 1)
-
-  return { shareCode, totalOdds: parseFloat(totalOdds.toFixed(2)), games, raw: data }
+  throw new Error(lastError || 'Failed to decode booking code')
 }
 
 export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
