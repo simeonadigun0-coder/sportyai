@@ -58,61 +58,6 @@ export default function Dashboard() {
     Authorization: `Bearer ${localStorage.getItem('token')}`,
   })
 
-  const parseSlipFromRaw = (raw: string) => {
-    const data = JSON.parse(raw)
-    const outcomes = data?.data?.outcomes || []
-    const selections = data?.data?.ticket?.selections || []
-    const displayTotalOdds = parseFloat(data?.data?.ticket?.displayTotalOdds || '1')
-    const shareCode = data?.data?.shareCode || ''
-
-    const games: Game[] = outcomes.map((item: Record<string, unknown>, index: number) => {
-      const sel = (selections[index] || {}) as Record<string, unknown>
-      const sport = item.sport as Record<string, unknown>
-      const sportName = (sport?.name as string) || 'Football'
-      const category = sport?.category as Record<string, unknown>
-      const tournament = category?.tournament as Record<string, unknown>
-      const league = (tournament?.name as string) || ''
-      const markets = (item.markets as unknown[]) || []
-      let odds = 1
-      let pick = ''
-      let market = '1X2'
-
-      if (markets.length > 0) {
-        const firstMarket = markets[0] as Record<string, unknown>
-        market = (firstMarket.desc as string) || '1X2'
-        const outs = (firstMarket.outcomes as unknown[]) || []
-        const outcomeId = sel.outcomeId as string
-        const matched = outs.find((o: unknown) => {
-          const oc = o as Record<string, unknown>
-          return String(oc.id) === String(outcomeId)
-        }) as Record<string, unknown> | undefined
-
-        if (matched) {
-          odds = parseFloat(String(matched.odds || 1))
-          pick = (matched.desc as string) || ''
-        } else if (outs.length > 0) {
-          const first = outs[0] as Record<string, unknown>
-          odds = parseFloat(String(first.odds || 1))
-          pick = (first.desc as string) || ''
-        }
-      }
-
-      return {
-        eventId: String(item.eventId || index),
-        homeTeam: (item.homeTeamName as string) || 'Home',
-        awayTeam: (item.awayTeamName as string) || 'Away',
-        market,
-        pick,
-        odds,
-        kickoffTime: String(item.estimateStartTime || ''),
-        league,
-        sport: sportName,
-      }
-    })
-
-    return { shareCode, totalOdds: displayTotalOdds, games }
-  }
-
   const handleDecode = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
