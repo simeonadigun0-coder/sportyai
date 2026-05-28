@@ -3,6 +3,9 @@ export interface SportyBetGame {
   homeTeam: string
   awayTeam: string
   market: string
+  marketId: string
+  outcomeId: string
+  specifier: string | null
   pick: string
   odds: number
   kickoffTime: string
@@ -31,111 +34,98 @@ export async function decodeBookingCode(shareCode: string): Promise<SportyBetSli
   const url = `https://www.sportybet.com/api/ng/orders/share/${cleanCode}?_t=${Date.now()}`
 
   const res = await fetch(url, { headers: HEADERS })
-
-  if (!res.ok) {
-    throw new Error(`SportyBet API error: ${res.status} ${res.statusText}`)
-  }
+  if (!res.ok) throw new Error(`SportyBet API error: ${res.status}`)
 
   const data = await res.json()
+  if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Invalid booking code')
 
-  if (!data || data.bizCode !== 10000) {
-    throw new Error(data?.message || 'Invalid booking code or code not found')
-  }
-
-  // Games are in data.outcomes
   const outcomes: unknown[] = data.data?.outcomes || []
-
-  if (!outcomes.length) {
-    throw new Error('No games found in this booking code')
-  }
-
-  // Selections have the odds and picks
   const selections: unknown[] = data.data?.ticket?.selections || []
+  const displayTotalOdds = parseFloat(data.data?.ticket?.displayTotalOdds || '1')
+
+  if (!outcomes.length) throw new Error('No games found in this booking code')
 
   const games: SportyBetGame[] = outcomes.map((item: unknown, index: number) => {
     const g = item as Record<string, unknown>
     const sel = (selections[index] || {}) as Record<string, unknown>
-
     const sport = g.sport as Record<string, unknown>
     const sportName = (sport?.name as string) || 'Football'
     const category = sport?.category as Record<string, unknown>
     const tournament = category?.tournament as Record<string, unknown>
     const league = (tournament?.name as string) || ''
-
-    // Get odds from outcomes markets
     const markets = (g.markets as unknown[]) || []
+
     let odds = 1
     let pick = ''
     let market = '1X2'
+    let marketId = String(sel.marketId || '1')
+    let outcomeId = String(sel.outcomeId || '1')
+    const specifier = (sel.specifier as string | null) || null
 
     if (markets.length > 0) {
       const firstMarket = markets[0] as Record<string, unknown>
-      market = (firstMarket.name as string) || '1X2'
-      const outcomes2 = (firstMarket.outcomes as unknown[]) || []
-      if (outcomes2.length > 0) {
-        const outcomeId = sel.outcomeId as string
-        const matchedOutcome = outcomes2.find((o: unknown) => {
-          const oc = o as Record<string, unknown>
-          return String(oc.id) === String(outcomeId)
-        }) as Record<string, unknown> | undefined
+      market = (firstMarket.desc as string) || '1X2'
+      marketId = String(firstMarket.id || '1')
+      const outs = (firstMarket.outcomes as unknown[]) || []
+      const matched = outs.find((o: unknown) => {
+        const oc = o as Record<string, unknown>
+        return String(oc.id) === String(sel.outcomeId)
+      }) as Record<string, unknown> | undefined
 
-        if (matchedOutcome) {
-          odds = parseFloat(String(matchedOutcome.odds || 1))
-          pick = (matchedOutcome.name as string) || ''
-        } else {
-          const firstOutcome = outcomes2[0] as Record<string, unknown>
-          odds = parseFloat(String(firstOutcome.odds || 1))
-          pick = (firstOutcome.name as string) || ''
-        }
+      if (matched) {
+        odds = parseFloat(String(matched.odds || 1))
+        pick = (matched.desc as string) || ''
+        outcomeId = String(matched.id || outcomeId)
+      } else if (outs.length > 0) {
+        const first = outs[0] as Record<string, unknown>
+        odds = parseFloat(String(first.odds || 1))
+        pick = (first.desc as string) || ''
+        outcomeId = String(first.id || outcomeId)
       }
     }
 
-    const kickoffTime = String(g.estimateStartTime || '')
-
     return {
-      eventId: String(g.eventId || g.gameId || index),
+      eventId: String(g.eventId || index),
       homeTeam: (g.homeTeamName as string) || 'Home',
       awayTeam: (g.awayTeamName as string) || 'Away',
       market,
+      marketId,
+      outcomeId,
+      specifier,
       pick,
       odds,
-      kickoffTime,
+      kickoffTime: String(g.estimateStartTime || ''),
       league,
       sport: sportName,
     }
   })
 
-  // Use displayTotalOdds from the response directly
-  const totalOdds = parseFloat(String(data.data?.ticket?.displayTotalOdds || 
-    games.reduce((acc, g) => acc * g.odds, 1)))
-
   return {
     shareCode: cleanCode,
-    totalOdds: parseFloat(totalOdds.toFixed(2)),
+    totalOdds: parseFloat(displayTotalOdds.toFixed(2)),
     games,
     raw: data,
   }
 }
 
 export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
-  const url = `https://www.sportybet.com/api/ng/orders/share?_t=${Date.now()}`
+  const url = `https://www.sportybet.com/api/ng/orders/share`
 
   const payload = {
-    ticket: {
-      selections: games.map(g => ({
-        eventId: g.eventId,
-        marketId: '1',
-        outcomeId: '1',
-        productId: 3,
-        sportId: 'sr:sport:1',
-      })),
-      orderType: 2,
-    }
+    selections: games.map(g => ({
+      eventId: g.eventId,
+      marketId: g.marketId || '1',
+      specifier: g.specifier || null,
+      outcomeId: g.outcomeId || '1',
+    }))
   }
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { ...HEADERS, 'Content-Type': 'application/json' },
+    headers: {
+      ...HEADERS,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(payload),
   })
 
@@ -144,8 +134,8 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
   const data = await res.json()
 
   if (!data || data.bizCode !== 10000) {
-    throw new Error(data?.message || 'Failed to generate new booking code')
+    throw new Error(data?.message || 'Failed to generate booking code')
   }
 
-  return data.data?.shareCode || data.data?.code || ''
+  return data.data?.shareCode || ''
 }
