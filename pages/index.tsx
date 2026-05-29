@@ -54,13 +54,11 @@ export default function AuthPage() {
       }}>
         <div className="fade-up" style={{ width: '100%', maxWidth: 400 }}>
 
-          {/* Logo */}
           <div style={{ textAlign: 'center', marginBottom: 28 }}>
             <div style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               width: 52, height: 52, borderRadius: 14,
-              background: 'var(--accent)',
-              marginBottom: 12,
+              background: 'var(--accent)', marginBottom: 12,
               boxShadow: '0 4px 16px rgba(22,163,74,0.30)',
             }}>
               <span style={{ fontSize: 24 }}>⚡</span>
@@ -73,14 +71,12 @@ export default function AuthPage() {
             </p>
           </div>
 
-          {/* Card */}
           <div style={{
             background: '#fff', borderRadius: 20,
             padding: '24px 20px',
             boxShadow: '0 8px 40px rgba(0,0,0,0.08)',
             border: '1px solid var(--border)',
           }}>
-            {/* Tabs */}
             <div style={{
               display: 'flex', gap: 4,
               background: 'var(--bg)',
@@ -108,7 +104,7 @@ export default function AuthPage() {
                 <div style={{ fontSize: 44, marginBottom: 12 }}>⏳</div>
                 <h3 style={{ fontWeight: 700, fontSize: 17, marginBottom: 8 }}>Account Submitted!</h3>
                 <p style={{ color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 }}>
-                  Your account is pending admin approval. You'll get an email once approved.
+                  Your account is pending admin approval. You will get an email once approved.
                 </p>
               </div>
             ) : (
@@ -155,11 +151,20 @@ export default function AuthPage() {
             )}
           </div>
 
-          {/* Features */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
             {[
-              { icon: '🤖', text: 'AI analyses real team form & injuries' },
+              { icon: '🤖', text: 'AI analyses real team form and injuries' },
               { icon: '🎯', text: 'Removes bad eggs from your slip' },
               { icon: '⚡', text: 'Generates a fresh SportyBet code' },
             ].map(item => (
-              <div key={item.text} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius:
+              <div key={item.text} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--border)' }}>
+                <span style={{ fontSize: 16 }}>{item.icon}</span>
+                <span style={{ fontSize: 13, color: 'var(--text2)' }}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
