@@ -1,15 +1,18 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { requireAuth } from '@/lib/auth'
-import { getAllUsers, updateUserStatus, findUserByEmail } from '@/lib/users'
+import { getAllUsers, updateUserStatus } from '@/lib/users'
 import { sendApprovalNotification } from '@/lib/email'
+
+const ADMIN_EMAIL = 'simeonadigun0@gmail.com'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const auth = requireAuth(req, res)
   if (!auth) return
 
-  // Check if admin
-  const user = await findUserByEmail(auth.email)
-  if (!user?.isAdmin) return res.status(403).json({ error: 'Admin access required' })
+  // Check admin by email directly — no DB lookup needed
+  if (auth.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+    return res.status(403).json({ error: 'Admin access required' })
+  }
 
   if (req.method === 'GET') {
     const users = await getAllUsers()
@@ -26,7 +29,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const status = action === 'approve' ? 'approved' : 'rejected'
     await updateUserStatus(userId, status)
 
-    // Send approval email
     const users = await getAllUsers()
     const targetUser = users.find(u => u.id === userId)
     if (targetUser && status === 'approved') {
