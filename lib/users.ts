@@ -29,15 +29,59 @@ export async function findUserById(id: string): Promise<User | undefined> {
 }
 
 export async function getAllUsers(): Promise<User[]> {
-  const keys = await redis.keys('user:id:*')
-  if (!keys.length) return []
-  const users = await Promise.all(keys.map(k => redis.get<User>(k)))
-  return users.filter(Boolean) as User[]
+  // Get from both user:id:* and user:email:* to catch all users
+  const idKeys = await redis.keys('user:id:*')
+  const emailKeys = await redis.keys('user:email:*')
+
+  const allUsers: User[] = []
+  const seenIds = new Set<string>()
+
+  // First get users by ID keys
+  if (idKeys.length) {
+    const users = await Promise.all(idKeys.map(k => redis.get<User>(k)))
+    for (const u of users) {
+      if (u && !seenIds.has(u.id)) {
+        seenIds.add(u.id)
+        allUsers.push(u)
+      }
+    }
+  }
+
+  // Then get users by email keys (catches old registrations)
+  if (emailKeys.length) {
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    for (const u of users) {
+      if (u && u.id && !seenIds.has(u.id)) {
+        seenIds.add(u.id)
+        // Fix missing fields for old users
+        const fixed: User = {
+          ...u,
+          status: u.status || 'approved',
+          isAdmin: u.email?.toLowerCase() === 'simeonadigun0@gmail.com',
+        }
+        allUsers.push(fixed)
+        // Also save with id key so future lookups work
+        await redis.set(`user:id:${u.id}`, fixed)
+      }
+    }
+  }
+
+  return allUsers
 }
 
 export async function updateUserStatus(id: string, status: 'pending' | 'approved' | 'rejected'): Promise<void> {
-  const user = await findUserById(id)
+  // Try finding by id key first
+  let user = await findUserById(id)
+
+  // Fallback — search email keys
+  if (!user) {
+    const emailKeys = await redis.keys('user:email:*')
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    user = users.find(u => u?.id === id) as User | undefined
+  }
+
   if (!user) return
+
   const updated = { ...user, status }
   await redis.set(`user:id:${id}`, updated)
   await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
@@ -46,8 +90,6 @@ export async function updateUserStatus(id: string, status: 'pending' | 'approved
 
 export async function createUser(username: string, email: string, password: string): Promise<User> {
   const passwordHash = bcrypt.hashSync(password, 10)
-
-  // Check if this is the admin account
   const isAdmin = email.toLowerCase() === 'simeonadigun0@gmail.com'
 
   const user: User = {
