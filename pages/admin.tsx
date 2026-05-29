@@ -57,12 +57,14 @@ export default function AdminPage() {
       })
       await fetchUsers()
     } finally {
-      setActionLoading(null) }
+      setActionLoading(null)
+    }
   }
 
-  const pending = users.filter(u => u.status === 'pending' && !u.isAdmin)
-  const approved = users.filter(u => u.status === 'approved' && !u.isAdmin)
-  const rejected = users.filter(u => u.status === 'rejected')
+  const nonAdminUsers = users.filter(u => !u.isAdmin)
+  const pending = nonAdminUsers.filter(u => u.status === 'pending')
+  const approved = nonAdminUsers.filter(u => u.status === 'approved')
+  const rejected = nonAdminUsers.filter(u => u.status === 'rejected')
 
   const statusColor = (s: string) =>
     s === 'approved' ? '#22c55e' : s === 'pending' ? '#eab308' : '#ef4444'
@@ -89,7 +91,6 @@ export default function AdminPage() {
         </nav>
 
         <main style={{ maxWidth: 900, margin: '0 auto', padding: '32px 20px' }}>
-
           {loading ? (
             <div style={{ textAlign: 'center', padding: 80 }}>
               <span className="spinner" />
@@ -97,10 +98,11 @@ export default function AdminPage() {
             </div>
           ) : (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 32 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 32 }}>
                 {[
-                  { label: 'PENDING APPROVAL', value: pending.length, color: '#eab308' },
-                  { label: 'APPROVED USERS', value: approved.length, color: '#22c55e' },
+                  { label: 'TOTAL USERS', value: users.length, color: 'var(--accent)' },
+                  { label: 'PENDING', value: pending.length, color: '#eab308' },
+                  { label: 'APPROVED', value: approved.length, color: '#22c55e' },
                   { label: 'REJECTED', value: rejected.length, color: '#ef4444' },
                 ].map(s => (
                   <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px' }}>
@@ -122,7 +124,7 @@ export default function AdminPage() {
                           <div style={{ fontWeight: 700, fontSize: 14 }}>{u.username}</div>
                           <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>{u.email}</div>
                           <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-                            Registered: {new Date(u.createdAt).toLocaleString()}
+                            {new Date(u.createdAt).toLocaleString()}
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8 }}>
@@ -145,35 +147,38 @@ export default function AdminPage() {
 
               <div className="card">
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', marginBottom: 14, letterSpacing: '0.05em' }}>
-                  ALL USERS ({users.filter(u => !u.isAdmin).length})
+                  ALL USERS ({users.length})
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {users.filter(u => !u.isAdmin).map(u => (
-                    <div key={u.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: 8, background: 'var(--bg2)', border: '1px solid var(--border)' }}>
+                  {users.map(u => (
+                    <div key={u.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: 8, background: u.isAdmin ? 'var(--accent-dim)' : 'var(--bg2)', border: u.isAdmin ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)' }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{u.username}</div>
+                        <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {u.username}
+                          {u.isAdmin && <span style={{ fontSize: 10, background: 'var(--accent)', color: '#041a08', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>ADMIN</span>}
+                        </div>
                         <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{u.email}</div>
                         <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-                          {new Date(u.createdAt).toLocaleString()}
+                          Joined: {new Date(u.createdAt).toLocaleString()}
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: statusColor(u.status), background: `${statusColor(u.status)}20`, padding: '3px 8px', borderRadius: 4, textTransform: 'uppercase' }}>
-                          {u.status}
+                        <span style={{ fontSize: 11, fontWeight: 700, color: u.isAdmin ? 'var(--accent)' : statusColor(u.status), background: u.isAdmin ? 'var(--accent-dim)' : `${statusColor(u.status)}20`, padding: '3px 8px', borderRadius: 4, textTransform: 'uppercase' }}>
+                          {u.isAdmin ? 'ADMIN' : u.status}
                         </span>
-                        {u.status === 'pending' && (
+                        {!u.isAdmin && u.status === 'pending' && (
                           <button onClick={() => handleAction(u.id, 'approve')}
                             style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                             Approve
                           </button>
                         )}
-                        {u.status === 'approved' && (
+                        {!u.isAdmin && u.status === 'approved' && (
                           <button onClick={() => handleAction(u.id, 'reject')}
                             style={{ background: 'var(--red-dim)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                             Revoke
                           </button>
                         )}
-                        {u.status === 'rejected' && (
+                        {!u.isAdmin && u.status === 'rejected' && (
                           <button onClick={() => handleAction(u.id, 'approve')}
                             style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                             Restore
@@ -182,7 +187,7 @@ export default function AdminPage() {
                       </div>
                     </div>
                   ))}
-                  {users.filter(u => !u.isAdmin).length === 0 && (
+                  {users.length === 0 && (
                     <div style={{ textAlign: 'center', color: 'var(--text3)', padding: 20, fontSize: 13 }}>
                       No users yet
                     </div>

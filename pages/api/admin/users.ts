@@ -9,7 +9,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const auth = requireAuth(req, res)
   if (!auth) return
 
-  // Check admin by email directly — no DB lookup needed
   if (auth.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
     return res.status(403).json({ error: 'Admin access required' })
   }
