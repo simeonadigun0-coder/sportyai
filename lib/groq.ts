@@ -37,8 +37,6 @@ export interface SlipAnalysis {
   summary: string
 }
 
-// ============ HELPERS ============
-
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -48,8 +46,6 @@ function teamsMatch(a: string, b: string, c: string, d: string): boolean {
   const overlap = (x: string, y: string) => normalize(x).includes(fw(y)) || normalize(y).includes(fw(x))
   return overlap(a, c) && overlap(b, d)
 }
-
-// ============ BSD ============
 
 async function getBSDEvent(homeTeam: string, awayTeam: string): Promise<Record<string, unknown> | null> {
   const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
@@ -65,7 +61,12 @@ async function getBSDEvent(homeTeam: string, awayTeam: string): Promise<Record<s
       const data = await res.json()
       const match = (data.results || []).find((e: unknown) => {
         const ev = e as Record<string, unknown>
-        return teamsMatch(ev.home_team as string || '', ev.away_team as string || '', homeTeam, awayTeam)
+        return teamsMatch(
+          ev.home_team as string || '',
+          ev.away_team as string || '',
+          homeTeam,
+          awayTeam
+        )
       })
       if (match) {
         const ev = match as Record<string, unknown>
@@ -85,34 +86,40 @@ function parseBSD(event: Record<string, unknown>, homeTeam: string, awayTeam: st
   const pred = event.prediction as Record<string, unknown> | null
 
   const fmt = (f: Record<string, unknown> | null, name: string) =>
-    f ? `${name}: [${f.form_string || '?'}] W${f.wins || 0}D${f.draws || 0}L${f.losses || 0} scored:${f.goals_scored_last_n || 0} conceded:${f.goals_conceded_last_n || 0} homePPG:${f.home_ppg || 0} awayPPG:${f.away_ppg || 0}`
-      : `${name}: no form data`
+    f
+      ? `${name}:[${f.form_string || '?'}] W${f.wins || 0}D${f.draws || 0}L${f.losses || 0} scored:${f.goals_scored_last_n || 0} conceded:${f.goals_conceded_last_n || 0} homePPG:${f.home_ppg || 0} awayPPG:${f.away_ppg || 0}`
+      : `${name}:no form data`
 
   const fmtH2H = (h: Record<string, unknown> | null) =>
-    h ? `H2H(${h.total_matches || 0}): ${homeTeam} wins:${h.home_wins || 0} draws:${h.draws || 0} ${awayTeam} wins:${h.away_wins || 0}`
-      : 'H2H: no data'
+    h
+      ? `H2H(${h.total_matches || 0}): ${homeTeam} wins:${h.home_wins || 0} draws:${h.draws || 0} ${awayTeam} wins:${h.away_wins || 0}`
+      : 'H2H:no data'
 
   const fmtInjuries = (u: Record<string, unknown> | null) => {
-    if (!u) return 'Injuries: no data'
-    const fmtP = (arr: unknown[]) => arr.map((p: unknown) => {
-      const pl = p as Record<string, unknown>
-      return `${pl.name}(${pl.status})`
-    }).join(',')
+    if (!u) return 'Injuries:no data'
+    const fmtP = (arr: unknown[]) =>
+      arr.map((p: unknown) => {
+        const pl = p as Record<string, unknown>
+        return `${pl.name}(${pl.status})`
+      }).join(',')
     const h = (u.home as unknown[] || [])
     const a = (u.away as unknown[] || [])
-    return `Injuries - Home:[${h.length ? fmtP(h) : 'none'}] Away:[${a.length ? fmtP(a) : 'none'}]`
+    return `Injuries-Home:[${h.length ? fmtP(h) : 'none'}] Away:[${a.length ? fmtP(a) : 'none'}]`
   }
 
   const parts = [fmt(hf, homeTeam), fmt(af, awayTeam), fmtH2H(h2h), fmtInjuries(unavail)]
-  if (pred) parts.push(`BSD ML: ${pred.predicted_result} Home:${pred.prob_home_win}% Draw:${pred.prob_draw}% Away:${pred.prob_away_win}%`)
+  if (pred) {
+    parts.push(`BSD ML:${pred.predicted_result} Home:${pred.prob_home_win}% Draw:${pred.prob_draw}% Away:${pred.prob_away_win}%`)
+  }
   return parts.join(' | ')
 }
 
-// ============ SOFASCORE ============
-
 async function getSofaTeamId(name: string): Promise<number | null> {
   try {
-    const res = await fetch(`${SOFA_BASE}/search/teams/${encodeURIComponent(name)}`, { headers: sofaHeaders })
+    const res = await fetch(
+      `${SOFA_BASE}/search/teams/${encodeURIComponent(name)}`,
+      { headers: sofaHeaders }
+    )
     if (!res.ok) return null
     const data = await res.json()
     const teams: unknown[] = data.teams || []
@@ -121,17 +128,21 @@ async function getSofaTeamId(name: string): Promise<number | null> {
       const team = t as Record<string, unknown>
       return normalize(team.name as string || '').includes(normalize(name).split(' ')[0])
     }) as Record<string, unknown> | undefined
-    return ((match || teams[0]) as Record<string, unknown>)?.id as number || null
+    const found = (match || teams[0]) as Record<string, unknown>
+    return (found?.id as number) || null
   } catch { return null }
 }
 
 async function getSofaForm(teamId: number, teamName: string): Promise<string> {
   try {
-    const res = await fetch(`${SOFA_BASE}/team/${teamId}/events/last/0`, { headers: sofaHeaders })
-    if (!res.ok) return `${teamName}: no data`
+    const res = await fetch(
+      `${SOFA_BASE}/team/${teamId}/events/last/0`,
+      { headers: sofaHeaders }
+    )
+    if (!res.ok) return `${teamName}:no data`
     const data = await res.json()
     const events = ((data.events || []) as unknown[]).slice(-5)
-    if (!events.length) return `${teamName}: no recent matches`
+    if (!events.length) return `${teamName}:no recent matches`
 
     let w = 0, d = 0, l = 0
     const results = events.map((e: unknown) => {
@@ -151,37 +162,39 @@ async function getSofaForm(teamId: number, teamName: string): Promise<string> {
       else d++
       return `${r}${scored}-${conceded}vs${opp}`
     })
-    return `${teamName} last5: W${w}D${d}L${l} [${results.join(',')}]`
-  } catch { return `${teamName}: no data` }
+    return `${teamName} last5:W${w}D${d}L${l} [${results.join(',')}]`
+  } catch { return `${teamName}:no data` }
 }
 
 async function getSofaData(homeTeam: string, awayTeam: string): Promise<string | null> {
   try {
-    const [homeId, awayId] = await Promise.all([getSofaTeamId(homeTeam), getSofaTeamId(awayTeam)])
+    const [homeId, awayId] = await Promise.all([
+      getSofaTeamId(homeTeam),
+      getSofaTeamId(awayTeam),
+    ])
     if (!homeId && !awayId) return null
 
     const [homeForm, awayForm] = await Promise.all([
-      homeId ? getSofaForm(homeId, homeTeam) : Promise.resolve(`${homeTeam}: no data`),
-      awayId ? getSofaForm(awayId, awayTeam) : Promise.resolve(`${awayTeam}: no data`),
+      homeId ? getSofaForm(homeId, homeTeam) : Promise.resolve(`${homeTeam}:no data`),
+      awayId ? getSofaForm(awayId, awayTeam) : Promise.resolve(`${awayTeam}:no data`),
     ])
 
     return `${homeForm} | ${awayForm}`
   } catch { return null }
 }
 
-// ============ GATHER DATA FOR ALL GAMES IN PARALLEL ============
-
 async function gatherGameData(game: SportyBetGame): Promise<{
   game: SportyBetGame
   context: string
   dataSource: string
 }> {
-  const isFootball = !game.sport ||
+  const isFootball =
+    !game.sport ||
     game.sport.toLowerCase().includes('football') ||
     game.sport.toLowerCase().includes('soccer')
 
   if (!isFootball) {
-    return { game, context: 'Non-football sport - no database coverage', dataSource: 'AI_WEB_SEARCH' }
+    return { game, context: '', dataSource: 'AI_WEB_SEARCH' }
   }
 
   let context = ''
@@ -193,12 +206,12 @@ async function gatherGameData(game: SportyBetGame): Promise<{
   ])
 
   if (bsdEvent) {
-    context += `BSD: ${parseBSD(bsdEvent, game.homeTeam, game.awayTeam)}`
+    context += `BSD:${parseBSD(bsdEvent, game.homeTeam, game.awayTeam)}`
     dataSource = 'BSD'
   }
 
   if (sofaData) {
-    context += context ? ` | SOFA: ${sofaData}` : `SOFA: ${sofaData}`
+    context += context ? ` | SOFA:${sofaData}` : `SOFA:${sofaData}`
     dataSource = bsdEvent ? 'BSD+SOFASCORE' : 'SOFASCORE'
   }
 
@@ -207,50 +220,45 @@ async function gatherGameData(game: SportyBetGame): Promise<{
   return { game, context, dataSource }
 }
 
-// ============ SINGLE BATCH AI CALL FOR ALL GAMES ============
+interface AnalysisResult {
+  eventId: string
+  confidenceScore: number
+  riskScore: number
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  keep: boolean
+  reason: string
+  formSummary: string
+}
 
 async function batchAnalyseGames(
   gameData: Array<{ game: SportyBetGame; context: string; dataSource: string }>,
   targetOdds: number
-): Promise<Map<string, { confidenceScore: number; riskScore: number; riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; reason: string; formSummary: string; keep: boolean }>> {
+): Promise<Map<string, AnalysisResult>> {
 
   const gamesList = gameData.map((gd, i) => {
-    const oddsWarning = gd.game.odds >= 3.0 ? '⚠️HIGH_ODDS' : gd.game.odds >= 2.0 ? 'MED_ODDS' : 'LOW_ODDS'
-    return `GAME_${i + 1}|eventId:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:"${gd.game.pick}"(${gd.game.market})|odds:${gd.game.odds}|${oddsWarning}|data:${gd.context || 'NO_DATA_AVAILABLE'}`
+    const oddsTag = gd.game.odds >= 3.0 ? 'HIGH_ODDS' : gd.game.odds >= 2.0 ? 'MED_ODDS' : 'LOW_ODDS'
+    const dataTag = gd.context ? gd.context : 'NO_DATA_AVAILABLE'
+    return `GAME_${i + 1}|id:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:"${gd.game.pick}"(${gd.game.market})|odds:${gd.game.odds}|${oddsTag}|${dataTag}`
   }).join('\n')
 
-  const prompt = `You are a professional football betting analyst. Your ONLY goal is profitable betting — remove ALL low-confidence picks.
+  const prompt = `You are a professional football betting analyst. Goal: profitable betting only.
 
-RULES:
-- Confidence 75-100%: KEEP — strong data support
-- Confidence 60-74%: KEEP — reasonable support  
-- Confidence 40-59%: REMOVE — not confident enough
-- Confidence 0-39%: REMOVE — definitely not
-- Odds 3.0+: Need 75%+ confidence to keep (high risk)
-- Odds 2.0-2.99: Need 60%+ confidence to keep
-- Odds under 2.0: Need 55%+ confidence to keep
-- NO DATA available: Max 40% confidence → REMOVE
-- When in doubt: REMOVE. Safety first always.
+CONFIDENCE THRESHOLDS:
+- Odds 3.0+: Need 75%+ confidence to KEEP
+- Odds 2.0-2.99: Need 60%+ confidence to KEEP
+- Odds under 2.0: Need 55%+ confidence to KEEP
+- NO_DATA_AVAILABLE: Max 35% confidence → always REMOVE
+- When in doubt: REMOVE. Safety always first.
 
-TARGET ODDS: ${targetOdds} (analyse all games, keep only those you are genuinely confident about)
+TARGET ODDS: ${targetOdds}
 
-GAMES TO ANALYSE:
+GAMES:
 ${gamesList}
 
-Analyse each game based on the data provided. Think like a punter who wants to WIN, not just to have many games.
+Analyse each game. Think like a punter who wants to WIN.
 
-Respond ONLY with a valid JSON array — one object per game in the SAME ORDER:
-[
-  {
-    "eventId": "exact eventId from input",
-    "confidenceScore": <0-100>,
-    "riskScore": <1-10>,
-    "riskLevel": "<LOW|MEDIUM|HIGH>",
-    "keep": <true if confidenceScore meets odds threshold>,
-    "reason": "<1-2 sentences referencing actual data>",
-    "formSummary": "<single most decisive data point>"
-  }
-]`
+Respond ONLY with a valid JSON array, one object per game in the SAME ORDER:
+[{"eventId":"exact id","confidenceScore":<0-100>,"riskScore":<1-10>,"riskLevel":"<LOW|MEDIUM|HIGH>","keep":<true or false>,"reason":"<1-2 sentences>","formSummary":"<key data point>"}]`
 
   const completion = await groq.chat.completions.create({
     model: 'llama-3.3-70b-versatile',
@@ -262,73 +270,67 @@ Respond ONLY with a valid JSON array — one object per game in the SAME ORDER:
   const raw = completion.choices[0]?.message?.content || '[]'
   const cleaned = raw.replace(/```json|```/g, '').trim()
 
+  const map = new Map<string, AnalysisResult>()
+
   try {
-    const results = JSON.parse(cleaned) as Array<{
-      eventId: string
-      confidenceScore: number
-      riskScore: number
-      riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
-      keep: boolean
-      reason: string
-      formSummary: string
-    }>
+    const results = JSON.parse(cleaned) as AnalysisResult[]
 
-    const map = new Map<string, typeof results[0]>()
     for (const r of results) {
-      // Safety override: enforce odds-based confidence thresholds
-      const game = gameData.find(gd => gd.game.eventId === r.eventId)
-      let keep = r.keep
+      const gd = gameData.find(g => g.game.eventId === r.eventId)
+      let keep = r.keep === true
 
-      if (game) {
-        const minConfidence = game.game.odds >= 3.0 ? 75 : game.game.odds >= 2.0 ? 60 : 55
-        if (r.confidenceScore < minConfidence) keep = false
-        if (!game.context || game.context === 'NO_DATA_AVAILABLE') keep = false
+      if (gd) {
+        const minConf = gd.game.odds >= 3.0 ? 75 : gd.game.odds >= 2.0 ? 60 : 55
+        if (r.confidenceScore < minConf) keep = false
+        if (!gd.context) keep = false
       }
 
       map.set(r.eventId, { ...r, keep })
     }
-    return map
   } catch {
-    // Fallback: conservative — remove anything without data
-    const map = new Map<string, { confidenceScore: number; riskScore: number; riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; reason: string; formSummary: string; keep: boolean }>()
     for (const gd of gameData) {
-      const hasData = gd.context && gd.context !== 'NO_DATA_AVAILABLE'
+      const hasData = Boolean(gd.context)
+      const lowOdds = gd.game.odds < 2.0
       map.set(gd.game.eventId, {
+        eventId: gd.game.eventId,
         confidenceScore: hasData ? 55 : 30,
         riskScore: hasData ? 5 : 8,
         riskLevel: hasData ? 'MEDIUM' : 'HIGH',
-        reason: hasData ? 'Analysis parse failed — kept cautiously' : 'No data found — removed for safety',
+        reason: hasData
+          ? 'Analysis parse failed — kept cautiously due to low odds'
+          : 'No data found — removed for safety',
         formSummary: gd.dataSource,
-        keep: hasData && gd.game.odds < 2.0,
+        keep: hasData && lowOdds,
       })
     }
-    return map
   }
-}
 
-// ============ NON-FOOTBALL WEB SEARCH ============
+  return map
+}
 
 async function analyseNonFootballBatch(
   games: SportyBetGame[],
   targetOdds: number
-): Promise<Map<string, { confidenceScore: number; riskScore: number; riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; reason: string; formSummary: string; keep: boolean }>> {
+): Promise<Map<string, AnalysisResult>> {
 
   const gamesList = games.map((g, i) =>
-    `GAME_${i + 1}|eventId:${g.eventId}|${g.homeTeam} vs ${g.awayTeam}|${g.sport}|${g.league}|pick:"${g.pick}"(${g.market})|odds:${g.odds}`
+    `GAME_${i + 1}|id:${g.eventId}|${g.homeTeam} vs ${g.awayTeam}|${g.sport}|${g.league}|pick:"${g.pick}"(${g.market})|odds:${g.odds}`
   ).join('\n')
 
-  const prompt = `You are a professional sports betting analyst. Research these ${games[0]?.sport || 'sports'} matches and assess each pick.
+  const map = new Map<string, AnalysisResult>()
 
-Search for recent form, standings, and any relevant news for each match.
-Safety rule: confidence < 60% = REMOVE. High odds (3.0+) need 75%+ confidence.
+  try {
+    const prompt = `You are a professional sports betting analyst. Research these matches and assess each pick.
+
+Safety rule: confidence < 60% = REMOVE. Odds 3.0+ need 75%+ confidence.
+TARGET ODDS: ${targetOdds}
 
 GAMES:
 ${gamesList}
 
 Respond ONLY with valid JSON array:
-[{"eventId":"...","confidenceScore":<0-100>,"riskScore":<1-10>,"riskLevel":"<LOW|MEDIUM|HIGH>","keep":<bool>,"reason":"<1-2 sentences>","formSummary":"<key finding>"}]`
+[{"eventId":"exact id","confidenceScore":<0-100>,"riskScore":<1-10>,"riskLevel":"<LOW|MEDIUM|HIGH>","keep":<true or false>,"reason":"<1-2 sentences>","formSummary":"<key finding>"}]`
 
-  try {
     const completion = await groq.chat.completions.create({
       model: 'compound-beta',
       messages: [{ role: 'user', content: prompt }],
@@ -338,35 +340,29 @@ Respond ONLY with valid JSON array:
 
     const raw = completion.choices[0]?.message?.content || '[]'
     const cleaned = raw.replace(/```json|```/g, '').trim()
-    const results = JSON.parse(cleaned) as Array<{
-      eventId: string; confidenceScore: number; riskScore: number
-      riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; keep: boolean; reason: string; formSummary: string
-    }>
+    const results = JSON.parse(cleaned) as AnalysisResult[]
 
-    const map = new Map<string, typeof results[0]>()
     for (const r of results) {
       const game = games.find(g => g.eventId === r.eventId)
       const minConf = game && game.odds >= 3.0 ? 75 : 60
-      map.set(r.eventId, { ...r, keep: r.confidenceScore >= minConf && r.keep })
+      map.set(r.eventId, { ...r, keep: r.confidenceScore >= minConf && r.keep === true })
     }
-    return map
   } catch {
-    const map = new Map<string, { confidenceScore: number; riskScore: number; riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; reason: string; formSummary: string; keep: boolean }>()
     for (const g of games) {
       map.set(g.eventId, {
-        confidenceScore: 40,
+        eventId: g.eventId,
+        confidenceScore: 35,
         riskScore: 7,
         riskLevel: 'HIGH',
         reason: 'Could not research this match — removed for safety',
-        formSummary: 'No data',
+        formSummary: 'No data available',
         keep: false,
       })
     }
-    return map
   }
-}
 
-// ============ GAME SELECTION ============
+  return map
+}
 
 function selectGamesToKeep(games: GameAnalysis[], targetOdds: number): GameAnalysis[] {
   let kept = games.filter(g => g.keep)
@@ -374,7 +370,6 @@ function selectGamesToKeep(games: GameAnalysis[], targetOdds: number): GameAnaly
 
   let total = kept.reduce((acc, g) => acc * g.odds, 1)
 
-  // Still above target — remove lowest confidence first
   if (total > targetOdds * 1.25 && kept.length > 2) {
     kept = [...kept].sort((a, b) => a.confidenceScore - b.confidenceScore)
     while (kept.length > 2 && total > targetOdds * 1.25) {
@@ -383,7 +378,6 @@ function selectGamesToKeep(games: GameAnalysis[], targetOdds: number): GameAnaly
     }
   }
 
-  // Minimum 2 games
   if (kept.length < 2) {
     const safest = [...removed].sort((a, b) => b.confidenceScore - a.confidenceScore)
     for (const g of safest) {
@@ -395,8 +389,6 @@ function selectGamesToKeep(games: GameAnalysis[], targetOdds: number): GameAnaly
   return kept
 }
 
-// ============ MAIN EXPORT ============
-
 export async function analyseSlip(
   games: SportyBetGame[],
   targetOdds: number,
@@ -404,25 +396,24 @@ export async function analyseSlip(
 ): Promise<SlipAnalysis> {
 
   const footballGames = games.filter(g =>
-    !g.sport || g.sport.toLowerCase().includes('football') || g.sport.toLowerCase().includes('soccer')
+    !g.sport ||
+    g.sport.toLowerCase().includes('football') ||
+    g.sport.toLowerCase().includes('soccer')
   )
   const otherGames = games.filter(g =>
-    g.sport && !g.sport.toLowerCase().includes('football') && !g.sport.toLowerCase().includes('soccer')
+    g.sport &&
+    !g.sport.toLowerCase().includes('football') &&
+    !g.sport.toLowerCase().includes('soccer')
   )
 
-  // Step 1: Gather data for all football games in parallel (no AI yet)
   const footballData = await Promise.all(footballGames.map(g => gatherGameData(g)))
-
-  // Step 2: Single AI call for ALL football games at once
   const footballResults = await batchAnalyseGames(footballData, targetOdds)
 
-  // Step 3: Single AI call for non-football games
   const otherResults = otherGames.length > 0
     ? await analyseNonFootballBatch(otherGames, targetOdds)
-    : new Map()
+    : new Map<string, AnalysisResult>()
 
-  // Step 4: Merge results
-  const allResults = new Map([...footballResults, ...otherResults])
+  const allResults = new Map<string, AnalysisResult>([...footballResults, ...otherResults])
   const dataSourceMap = new Map(footballData.map(fd => [fd.game.eventId, fd.dataSource]))
 
   const analysisResults: GameAnalysis[] = games.map(game => {
@@ -436,7 +427,7 @@ export async function analyseSlip(
         riskScore: 8,
         riskLevel: 'HIGH' as const,
         reason: 'No analysis result — removed for safety',
-        formSummary: 'Error in analysis',
+        formSummary: 'Analysis error',
         keep: false,
         dataSource: 'FALLBACK',
       }
@@ -461,14 +452,14 @@ export async function analyseSlip(
   const removedGames = finalGames.filter(g => !g.keep)
   const newOdds = keptGames.reduce((acc, g) => acc * g.odds, 1)
 
-  // Summary — one small call
   let summary = `Analysed ${games.length} games. Kept ${keptGames.length} confident picks at ${newOdds.toFixed(2)} odds. Removed ${removedGames.length} low-confidence picks for safety.`
+
   try {
     const sc = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [{
         role: 'user',
-        content: `2 sentences for a Nigerian punter: Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target: ${targetOdds}). Removed: ${removedGames.map(g => `${g.homeTeam} vs ${g.awayTeam}(${g.confidenceScore}% confidence)`).join(', ') || 'none'}. Be direct and professional.`
+        content: `2 sentences for a Nigerian punter. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). Removed:${removedGames.map(g => `${g.homeTeam} vs ${g.awayTeam}(${g.confidenceScore}%)`).join(',') || 'none'}. Be direct and professional.`,
       }],
       temperature: 0.4,
       max_tokens: 120,
