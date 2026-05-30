@@ -31,137 +31,129 @@ export interface SlipAnalysis {
 
 // --- BSD helpers ---
 
-async function searchBSDEvent(homeTeam: string, awayTeam: string, kickoffTime: string): Promise<Record<string, unknown> | null> {
-  try {
-    // Search by team name — try home team first
-    const dateStr = kickoffTime
-      ? new Date(parseInt(kickoffTime)).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0]
-
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
-    const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
-
-    const url = `${BSD_BASE}/events/?team=${encodeURIComponent(homeTeam)}&date_from=${yesterday}&date_to=${nextWeek}&limit=20`
-    const res = await fetch(url, { headers: bsdHeaders })
-    if (!res.ok) return null
-
-    const data = await res.json()
-    const events: unknown[] = data.results || []
-
-    // Find matching event
-    const match = events.find((e: unknown) => {
-      const ev = e as Record<string, unknown>
-      const home = (ev.home_team as string || '').toLowerCase()
-      const away = (ev.away_team as string || '').toLowerCase()
-      const searchHome = homeTeam.toLowerCase()
-      const searchAway = awayTeam.toLowerCase()
-      return (
-        (home.includes(searchHome.split(' ')[0]) || searchHome.includes(home.split(' ')[0])) &&
-        (away.includes(searchAway.split(' ')[0]) || searchAway.includes(away.split(' ')[0]))
-      )
-    })
-
-    if (!match) return null
-
-    // Get full event detail with form and H2H
-    const ev = match as Record<string, unknown>
-    const detailRes = await fetch(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders })
-    if (!detailRes.ok) return ev
-    return await detailRes.json()
-
-  } catch {
-    return null
-  }
+function getFirstWord(name: string): string {
+  return name.trim().split(/\s+/)[0]
 }
 
-async function getBSDStandings(leagueName: string): Promise<Record<string, unknown> | null> {
+function teamsMatch(bsdHome: string, bsdAway: string, searchHome: string, searchAway: string): boolean {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()
+  const bH = normalize(bsdHome)
+  const bA = normalize(bsdAway)
+  const sH = normalize(searchHome)
+  const sA = normalize(searchAway)
+
+  const firstWordMatch = (a: string, b: string) => {
+    const aW = a.split(' ')[0]
+    const bW = b.split(' ')[0]
+    return a.includes(bW) || b.includes(aW) || aW === bW
+  }
+
+  return firstWordMatch(bH, sH) && firstWordMatch(bA, sA)
+}
+
+async function searchBSDEvent(
+  homeTeam: string,
+  awayTeam: string,
+  kickoffTime: string
+): Promise<Record<string, unknown> | null> {
   try {
-    // Find the league
-    const leagueRes = await fetch(`${BSD_BASE}/leagues/`, { headers: bsdHeaders })
-    if (!leagueRes.ok) return null
-    const leagueData = await leagueRes.json()
-    const leagues: unknown[] = leagueData.results || []
+    const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
+    const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
 
-    const league = leagues.find((l: unknown) => {
-      const lg = l as Record<string, unknown>
-      const name = (lg.name as string || '').toLowerCase()
-      const search = leagueName.toLowerCase()
-      return name.includes(search.split(' ')[0]) || search.includes(name.split(' ')[0])
-    })
+    // Try multiple search strategies
+    const searchAttempts = [
+      `${BSD_BASE}/events/?team=${encodeURIComponent(homeTeam)}&date_from=${yesterday}&date_to=${nextTwoWeeks}&limit=50`,
+      `${BSD_BASE}/events/?team=${encodeURIComponent(getFirstWord(homeTeam))}&date_from=${yesterday}&date_to=${nextTwoWeeks}&limit=50`,
+      `${BSD_BASE}/events/?team=${encodeURIComponent(awayTeam)}&date_from=${yesterday}&date_to=${nextTwoWeeks}&limit=50`,
+      `${BSD_BASE}/events/?team=${encodeURIComponent(getFirstWord(awayTeam))}&date_from=${yesterday}&date_to=${nextTwoWeeks}&limit=50`,
+    ]
 
-    if (!league) return null
-    const lg = league as Record<string, unknown>
+    for (const url of searchAttempts) {
+      try {
+        const res = await fetch(url, { headers: bsdHeaders })
+        if (!res.ok) continue
 
-    // Get standings
-    const standingsRes = await fetch(`${BSD_BASE}/leagues/${lg.id}/standings/`, { headers: bsdHeaders })
-    if (!standingsRes.ok) return null
-    return await standingsRes.json()
+        const data = await res.json()
+        const events: unknown[] = data.results || []
 
+        const match = events.find((e: unknown) => {
+          const ev = e as Record<string, unknown>
+          return teamsMatch(
+            ev.home_team as string || '',
+            ev.away_team as string || '',
+            homeTeam,
+            awayTeam
+          )
+        })
+
+        if (match) {
+          const ev = match as Record<string, unknown>
+          // Get full detail with form + H2H
+          const detailRes = await fetch(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders })
+          if (!detailRes.ok) return ev
+          return await detailRes.json()
+        }
+      } catch { continue }
+    }
+
+    return null
   } catch {
     return null
   }
 }
 
 function formatFormData(form: Record<string, unknown> | null | undefined, teamName: string): string {
-  if (!form) return `No form data available for ${teamName}`
-
-  const formString = form.form_string as string || ''
-  const w = form.wins as number || 0
-  const d = form.draws as number || 0
-  const l = form.losses as number || 0
-  const gScored = form.goals_scored_last_n as number || 0
-  const gConceded = form.goals_conceded_last_n as number || 0
-  const homePPG = form.home_ppg as number || 0
-  const awayPPG = form.away_ppg as number || 0
-  const cleanSheets = form.clean_sheets as number || 0
-
-  return `${teamName}: Form ${formString} (W${w} D${d} L${l}), scored ${gScored}, conceded ${gConceded}, ${cleanSheets} clean sheets, Home PPG: ${homePPG}, Away PPG: ${awayPPG}`
+  if (!form) return `No form data for ${teamName}`
+  const formString = (form.form_string as string) || ''
+  const w = (form.wins as number) || 0
+  const d = (form.draws as number) || 0
+  const l = (form.losses as number) || 0
+  const gScored = (form.goals_scored_last_n as number) || 0
+  const gConceded = (form.goals_conceded_last_n as number) || 0
+  const homePPG = (form.home_ppg as number) || 0
+  const awayPPG = (form.away_ppg as number) || 0
+  const cleanSheets = (form.clean_sheets as number) || 0
+  return `${teamName}: Form [${formString}] W${w} D${d} L${l} | Scored: ${gScored} Conceded: ${gConceded} | Clean sheets: ${cleanSheets} | Home PPG: ${homePPG} Away PPG: ${awayPPG}`
 }
 
 function formatH2H(h2h: Record<string, unknown> | null | undefined, homeTeam: string, awayTeam: string): string {
-  if (!h2h) return 'No head-to-head data available'
-
-  const total = h2h.total_matches as number || 0
-  const homeWins = h2h.home_wins as number || 0
-  const draws = h2h.draws as number || 0
-  const awayWins = h2h.away_wins as number || 0
-  const avgGoals = h2h.avg_total_goals as number || 0
-
-  return `H2H (${total} meetings): ${homeTeam} wins: ${homeWins}, Draws: ${draws}, ${awayTeam} wins: ${awayWins}, Avg goals: ${avgGoals}`
+  if (!h2h) return 'No H2H data'
+  const total = (h2h.total_matches as number) || 0
+  const homeWins = (h2h.home_wins as number) || 0
+  const draws = (h2h.draws as number) || 0
+  const awayWins = (h2h.away_wins as number) || 0
+  const avgGoals = (h2h.avg_total_goals as number) || 0
+  return `H2H (${total} meetings): ${homeTeam} wins ${homeWins} | Draws ${draws} | ${awayTeam} wins ${awayWins} | Avg goals: ${avgGoals}`
 }
 
 function formatUnavailable(unavailable: Record<string, unknown> | null | undefined): string {
-  if (!unavailable) return 'No injury/suspension data'
-
+  if (!unavailable) return 'No injury data'
   const home = (unavailable.home as unknown[]) || []
   const away = (unavailable.away as unknown[]) || []
-
-  const formatPlayers = (players: unknown[]) =>
+  const fmt = (players: unknown[]) =>
     players.map((p: unknown) => {
       const player = p as Record<string, unknown>
       return `${player.name} (${player.status})`
     }).join(', ')
-
-  const homeMissing = home.length ? `Home missing: ${formatPlayers(home)}` : ''
-  const awayMissing = away.length ? `Away missing: ${formatPlayers(away)}` : ''
-
-  return [homeMissing, awayMissing].filter(Boolean).join(' | ') || 'All players available'
+  const h = home.length ? `Home missing: ${fmt(home)}` : ''
+  const a = away.length ? `Away missing: ${fmt(away)}` : ''
+  return [h, a].filter(Boolean).join(' | ') || 'All players available'
 }
 
-// --- Main Analysis Functions ---
+// --- Analysis Functions ---
 
 async function analyseFootballGame(game: SportyBetGame): Promise<{
   riskScore: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   reason: string
   formSummary: string
+  keep: boolean
   dataSource: 'BSD' | 'AI_WEB_SEARCH' | 'FALLBACK'
 }> {
-  // Step 1: Try BSD first
+  // Try BSD first
   const bsdEvent = await searchBSDEvent(game.homeTeam, game.awayTeam, game.kickoffTime)
 
   if (bsdEvent) {
-    // We have real BSD data — build rich context for AI
     const homeForm = bsdEvent.home_form as Record<string, unknown> | null
     const awayForm = bsdEvent.away_form as Record<string, unknown> | null
     const h2h = bsdEvent.head_to_head as Record<string, unknown> | null
@@ -172,104 +164,106 @@ async function analyseFootballGame(game: SportyBetGame): Promise<{
     const h2hStr = formatH2H(h2h, game.homeTeam, game.awayTeam)
     const unavailableStr = formatUnavailable(unavailable)
 
-    // BSD ML prediction
-    const mlPrediction = bsdEvent.prediction as Record<string, unknown> | null
-    const mlStr = mlPrediction
-      ? `BSD ML Prediction: ${mlPrediction.predicted_result} (Home: ${mlPrediction.prob_home_win}%, Draw: ${mlPrediction.prob_draw}%, Away: ${mlPrediction.prob_away_win}%)`
-      : ''
-
-    const prompt = `You are an expert football punter with 20 years of experience. Analyse this match and give your honest assessment.
+    const prompt = `You are an expert football punter with 20 years of experience analysing matches.
 
 MATCH: ${game.homeTeam} vs ${game.awayTeam}
 LEAGUE: ${game.league}
-PICK ON SLIP: ${game.pick} (${game.market})
+PICK ON SLIP: "${game.pick}" (${game.market})
 
-REAL DATA:
+REAL MATCH DATA:
 ${homeFormStr}
 ${awayFormStr}
 ${h2hStr}
-UNAVAILABLE PLAYERS: ${unavailableStr}
-${mlStr}
+INJURIES/SUSPENSIONS: ${unavailableStr}
 
-As an experienced punter, assess this pick honestly:
-1. Does the recent form support this pick?
-2. Does the H2H record support this pick?
-3. Are key players missing that affect this pick?
-4. Would you personally back this pick based on the data?
+Your job: Decide if you would KEEP or REMOVE this pick from the betting slip.
 
-IMPORTANT: Your decision must be based on the DATA above, NOT the odds.
-Be a real punter — if the data supports the pick even at high odds, say KEEP.
-If the data shows this pick is risky even at low odds, say REMOVE.
+Think like a punter:
+- Does the form support this pick?
+- Does the H2H history support this pick?
+- Are key players missing that change the outcome?
+- Are there any red flags in the data?
 
-Respond ONLY in this exact JSON format (no markdown, no extra text):
+CRITICAL: Your decision must be based ONLY on the data above. 
+Do NOT factor in the odds at all.
+If data supports the pick → KEEP (even if odds seem high)
+If data raises doubts → REMOVE (even if odds seem low)
+
+Respond ONLY in valid JSON (no markdown):
 {
-  "riskScore": <number 1-10, where 1=very confident keep, 10=must remove>,
+  "riskScore": <1-10, where 1=very confident keep, 10=must remove>,
   "riskLevel": "<LOW|MEDIUM|HIGH>",
   "keep": <true or false>,
-  "reason": "<1-2 sentences explaining your punter decision based on the actual data>",
-  "formSummary": "<brief 1 sentence summary of key data points that influenced your decision>"
+  "reason": "<1-2 sentences explaining your punter decision based on the data>",
+  "formSummary": "<1 sentence: the single most important data point that influenced your decision>"
 }`
 
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-      max_tokens: 400,
-    })
-
     try {
+      const completion = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 400,
+      })
+
       const raw = completion.choices[0]?.message?.content || '{}'
       const cleaned = raw.replace(/```json|```/g, '').trim()
       const result = JSON.parse(cleaned)
+
       return {
         riskScore: result.riskScore || 5,
         riskLevel: result.riskLevel || 'MEDIUM',
-        reason: result.reason || 'Unable to assess',
+        reason: result.reason || 'BSD data found but parse failed',
         formSummary: result.formSummary || homeFormStr,
+        keep: result.keep !== false,
         dataSource: 'BSD',
       }
     } catch {
       return {
-        riskScore: 5,
-        riskLevel: 'MEDIUM',
+        riskScore: 5, riskLevel: 'MEDIUM',
         reason: 'BSD data found but analysis failed',
         formSummary: homeFormStr,
+        keep: true,
         dataSource: 'BSD',
       }
     }
   }
 
-  // Step 2: BSD not found — use Groq web search as fallback
+  // BSD not found — fallback to web search with punter-style prompt
   try {
-    const prompt = `You are an expert football punter with 20 years of experience. Search for current information about this match and give your honest assessment.
+    const prompt = `You are an expert football scout and punter. You need to research this match because it's in a smaller league not covered by major databases.
 
 MATCH: ${game.homeTeam} vs ${game.awayTeam}
 LEAGUE: ${game.league}
-PICK ON SLIP: ${game.pick} (${game.market})
+PICK ON SLIP: "${game.pick}" (${game.market})
 
 Search the web for:
-1. Recent form of both teams (last 5 matches)
-2. Any injury or suspension news
-3. Head-to-head record
-4. Any relevant match context
+1. "${game.homeTeam} recent results 2025 2026" — their last 5 matches
+2. "${game.awayTeam} recent results 2025 2026" — their last 5 matches  
+3. "${game.homeTeam} vs ${game.awayTeam} head to head history"
+4. Any injuries, suspensions, or news for either team
+5. ${game.league} table/standings if available
 
-As an experienced punter, assess this pick honestly based on what you find.
-Your decision must NOT be based on odds — only on form, H2H, and match context.
+After researching, make your punter decision:
+- Would you back "${game.pick}" in this match based on what you found?
+- Be honest — if you can't find enough data to be confident, say REMOVE
 
-Respond ONLY in this exact JSON format:
+IMPORTANT: Base your decision on form and match context, NOT on odds.
+
+Respond ONLY in valid JSON:
 {
-  "riskScore": <number 1-10>,
+  "riskScore": <1-10>,
   "riskLevel": "<LOW|MEDIUM|HIGH>",
   "keep": <true or false>,
-  "reason": "<1-2 sentences based on what you found>",
-  "formSummary": "<brief summary of what you found>"
+  "reason": "<1-2 sentences based on what you found or couldn't find>",
+  "formSummary": "<brief summary of key finding or why data was limited>"
 }`
 
     const completion = await groq.chat.completions.create({
       model: 'compound-beta',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
-      max_tokens: 500,
+      max_tokens: 600,
     })
 
     const raw = completion.choices[0]?.message?.content || '{}'
@@ -277,18 +271,20 @@ Respond ONLY in this exact JSON format:
     const result = JSON.parse(cleaned)
 
     return {
-      riskScore: result.riskScore || 5,
+      riskScore: result.riskScore || 6,
       riskLevel: result.riskLevel || 'MEDIUM',
-      reason: result.reason || 'Unable to assess',
-      formSummary: result.formSummary || 'Web search used',
+      reason: result.reason || 'Limited data available',
+      formSummary: result.formSummary || 'Small league — limited data',
+      keep: result.keep !== false,
       dataSource: 'AI_WEB_SEARCH',
     }
   } catch {
     return {
-      riskScore: 5,
+      riskScore: 6,
       riskLevel: 'MEDIUM',
-      reason: 'Could not find data for this match',
-      formSummary: 'No data available',
+      reason: 'Could not find data for this match — treated as moderate risk',
+      formSummary: 'Small league with limited online coverage',
+      keep: true,
       dataSource: 'FALLBACK',
     }
   }
@@ -299,22 +295,29 @@ async function analyseNonFootballGame(game: SportyBetGame): Promise<{
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   reason: string
   formSummary: string
+  keep: boolean
   dataSource: 'AI_WEB_SEARCH' | 'FALLBACK'
 }> {
   try {
-    const prompt = `You are an expert ${game.sport} betting analyst. Search for current information about this match.
+    const prompt = `You are an expert ${game.sport} betting analyst and scout.
 
 MATCH: ${game.homeTeam} vs ${game.awayTeam}
 SPORT: ${game.sport}
 LEAGUE: ${game.league}
-PICK ON SLIP: ${game.pick} (${game.market})
+PICK ON SLIP: "${game.pick}" (${game.market})
 
-Search for recent form, standings, injuries, and any relevant news.
-Make your decision based on data and punter intuition — NOT based on odds.
+Search the web for:
+1. Recent form of both teams in ${game.sport}
+2. Current ${game.league} standings
+3. Any injuries or suspensions
+4. Head-to-head between these two teams
+5. Any relevant news
 
-Respond ONLY in this exact JSON format:
+Make your punter decision based ONLY on form and match context, NOT odds.
+
+Respond ONLY in valid JSON:
 {
-  "riskScore": <number 1-10>,
+  "riskScore": <1-10>,
   "riskLevel": "<LOW|MEDIUM|HIGH>",
   "keep": <true or false>,
   "reason": "<1-2 sentences based on what you found>",
@@ -325,7 +328,7 @@ Respond ONLY in this exact JSON format:
       model: 'compound-beta',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
-      max_tokens: 500,
+      max_tokens: 600,
     })
 
     const raw = completion.choices[0]?.message?.content || '{}'
@@ -337,53 +340,39 @@ Respond ONLY in this exact JSON format:
       riskLevel: result.riskLevel || 'MEDIUM',
       reason: result.reason || 'Unable to assess',
       formSummary: result.formSummary || 'Web search used',
+      keep: result.keep !== false,
       dataSource: 'AI_WEB_SEARCH',
     }
   } catch {
     return {
-      riskScore: 5,
-      riskLevel: 'MEDIUM',
+      riskScore: 5, riskLevel: 'MEDIUM',
       reason: 'Could not find data for this match',
       formSummary: 'No data available',
+      keep: true,
       dataSource: 'FALLBACK',
     }
   }
 }
 
-function selectGamesToRemove(
-  games: GameAnalysis[],
-  targetOdds: number,
-  currentOdds: number
-): GameAnalysis[] {
-  if (currentOdds <= targetOdds * 1.3) {
-    // Already close to target — keep all, just mark by confidence
-    return games
-  }
+function selectGamesToKeep(games: GameAnalysis[], targetOdds: number, currentOdds: number): GameAnalysis[] {
+  if (currentOdds <= targetOdds * 1.3) return games
 
-  // Sort by riskScore descending — highest risk first
-  const sorted = [...games].sort((a, b) => b.riskScore - a.riskScore)
+  // Respect AI decisions first — remove what AI says to remove
+  const aiKept = games.filter(g => g.keep)
+  const aiRemoved = games.filter(g => !g.keep)
 
-  let kept = [...sorted]
+  let kept = [...aiKept].sort((a, b) => a.riskScore - b.riskScore)
+  let total = kept.reduce((acc, g) => acc * g.odds, 1)
 
-  // Remove games AI explicitly said to remove first
-  const aiRemoved = sorted.filter(g => !g.keep)
-  const aiKept = sorted.filter(g => g.keep)
-
-  // Start with AI kept games
-  kept = aiKept
-
-  // Check if we're now at or below target
-  let currentTotal = kept.reduce((acc, g) => acc * g.odds, 1)
-
-  // If still above target, remove more from the risky end of kept games
-  while (kept.length > 2 && currentTotal > targetOdds * 1.3) {
+  // Still above target — remove highest risk from kept
+  while (kept.length > 2 && total > targetOdds * 1.3) {
     kept = kept.slice(0, kept.length - 1)
-    currentTotal = kept.reduce((acc, g) => acc * g.odds, 1)
+    total = kept.reduce((acc, g) => acc * g.odds, 1)
   }
 
-  // If we removed too many and kept too few, add back some AI-removed games (lowest risk first)
-  const removedSorted = aiRemoved.sort((a, b) => a.riskScore - b.riskScore)
-  for (const game of removedSorted) {
+  // Too few — add back lowest risk of removed games
+  const removedByRisk = [...aiRemoved].sort((a, b) => a.riskScore - b.riskScore)
+  for (const game of removedByRisk) {
     if (kept.length >= 2) break
     kept.push(game)
   }
@@ -400,9 +389,10 @@ export async function analyseSlip(
   // Analyse ALL games in parallel
   const analysisResults: GameAnalysis[] = await Promise.all(
     games.map(async (game) => {
-      const isFootball = game.sport?.toLowerCase().includes('football') ||
-        game.sport?.toLowerCase().includes('soccer') ||
-        !game.sport // default to football
+      const isFootball =
+        !game.sport ||
+        game.sport.toLowerCase().includes('football') ||
+        game.sport.toLowerCase().includes('soccer')
 
       const analysis = isFootball
         ? await analyseFootballGame(game)
@@ -414,14 +404,14 @@ export async function analyseSlip(
         riskScore: analysis.riskScore,
         reason: analysis.reason,
         formSummary: analysis.formSummary,
+        keep: analysis.keep,
         dataSource: analysis.dataSource,
-        keep: (analysis as { keep?: boolean }).keep !== false, // default keep unless AI says remove
       } as GameAnalysis
     })
   )
 
   const currentOdds = analysisResults.reduce((acc, g) => acc * g.odds, 1)
-  const keptGames = selectGamesToRemove(analysisResults, targetOdds, currentOdds)
+  const keptGames = selectGamesToKeep(analysisResults, targetOdds, currentOdds)
   const keptIds = new Set(keptGames.map(g => g.eventId))
 
   const finalGames = analysisResults.map(g => ({
@@ -437,14 +427,14 @@ export async function analyseSlip(
   try {
     const bsdCount = analysisResults.filter(g => g.dataSource === 'BSD').length
     const webCount = analysisResults.filter(g => g.dataSource === 'AI_WEB_SEARCH').length
+    const fallbackCount = analysisResults.filter(g => g.dataSource === 'FALLBACK').length
 
     const summaryPrompt = `Summarise this bet slip analysis in 2 sentences for a Nigerian punter. Be direct and friendly.
 
 Original: ${games.length} games at ${originalTotalOdds} total odds.
-Removed ${removedGames.length} games: ${removedGames.map(g => `${g.homeTeam} vs ${g.awayTeam} (${g.reason})`).join('; ') || 'none'}
-Kept: ${keptGames.length} games at ${newOdds.toFixed(2)} odds.
-Target was: ${targetOdds} odds.
-Data sources: ${bsdCount} games analysed with real BSD data, ${webCount} with web search.`
+Removed ${removedGames.length} games: ${removedGames.map(g => `${g.homeTeam} vs ${g.awayTeam}`).join(', ') || 'none'}
+Kept: ${keptGames.length} games at ${newOdds.toFixed(2)} odds. Target: ${targetOdds} odds.
+Data quality: ${bsdCount} games with real BSD database data, ${webCount} with web search, ${fallbackCount} with limited data.`
 
     const summaryCompletion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
