@@ -458,7 +458,7 @@ otherResults.forEach((v, k) => allResults.set(k, v))
 
   try {
     const sc = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama3-8b-8192',
       messages: [{
         role: 'user',
         content: `2 sentences for a Nigerian punter. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). Removed:${removedGames.map(g => `${g.homeTeam} vs ${g.awayTeam}(${g.confidenceScore}%)`).join(',') || 'none'}. Be direct and professional.`,
