@@ -413,7 +413,9 @@ export async function analyseSlip(
     ? await analyseNonFootballBatch(otherGames, targetOdds)
     : new Map<string, AnalysisResult>()
 
-  const allResults = new Map<string, AnalysisResult>([...footballResults, ...otherResults])
+  const allResults = new Map<string, AnalysisResult>()
+footballResults.forEach((v, k) => allResults.set(k, v))
+otherResults.forEach((v, k) => allResults.set(k, v))
   const dataSourceMap = new Map(footballData.map(fd => [fd.game.eventId, fd.dataSource]))
 
   const analysisResults: GameAnalysis[] = games.map(game => {
