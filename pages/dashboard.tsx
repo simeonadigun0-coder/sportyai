@@ -17,10 +17,20 @@ interface Game {
   sport: string
 }
 
+interface GameAnalysis extends Game {
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  riskScore: number
+  confidenceScore: number
+  reason: string
+  formSummary: string
+  keep: boolean
+  dataSource: string
+}
+
 interface SlipAnalysis {
-  games: Array<Game & { riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; riskScore: number; reason: string; formSummary: string; keep: boolean }>
-  removedGames: Array<Game & { riskLevel: string; riskScore: number; reason: string; formSummary: string; keep: boolean }>
-  keptGames: Array<Game & { riskLevel: string; riskScore: number; reason: string; formSummary: string; keep: boolean }>
+  games: GameAnalysis[]
+  removedGames: GameAnalysis[]
+  keptGames: GameAnalysis[]
   originalOdds: number
   newOdds: number
   targetOdds: number
@@ -62,7 +72,10 @@ export default function Dashboard() {
     e.preventDefault()
     setLoading(true); setError('')
     try {
-      const res = await fetch('/api/decode', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code }) })
+      const res = await fetch('/api/decode', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ code }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to decode')
       if (!data.games?.length) throw new Error('No games found in this booking code')
@@ -79,12 +92,18 @@ export default function Dashboard() {
     if (!target || target < 1) { setError('Enter valid target odds'); return }
     setLoading(true); setError(''); setStep('analysing')
     try {
-      const res = await fetch('/api/analyse', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ games: slip.games, targetOdds: target, originalTotalOdds: slip.totalOdds }) })
+      const res = await fetch('/api/analyse', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ games: slip.games, targetOdds: target, originalTotalOdds: slip.totalOdds }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setAnalysis(data)
       if (data.keptGames?.length > 0) {
-        const rebookRes = await fetch('/api/rebook', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ games: data.keptGames }) })
+        const rebookRes = await fetch('/api/rebook', {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ games: data.keptGames }),
+        })
         const rebookData = await rebookRes.json()
         if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
       }
@@ -104,6 +123,17 @@ export default function Dashboard() {
     await fetch('/api/auth/logout')
     localStorage.removeItem('token')
     router.push('/')
+  }
+
+  const confidenceColor = (score: number) =>
+    score >= 75 ? '#16a34a' : score >= 60 ? '#d97706' : '#dc2626'
+
+  const dataSourceLabel = (source: string) => {
+    if (source === 'BSD+SOFASCORE') return '🟢 BSD + Sofascore'
+    if (source === 'BSD') return '🟢 BSD Data'
+    if (source === 'SOFASCORE') return '🔵 Sofascore'
+    if (source === 'AI_WEB_SEARCH') return '🟡 Web Search'
+    return '🔴 Limited Data'
   }
 
   return (
@@ -137,8 +167,7 @@ export default function Dashboard() {
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg)', borderRadius: 8, padding: '6px 10px', border: '1px solid var(--border)' }}>
               <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{username}</span>
-              <button onClick={logout}
-                style={{ background: 'none', color: 'var(--text3)', fontSize: 11, padding: 0, fontWeight: 600 }}>
+              <button onClick={logout} style={{ background: 'none', color: 'var(--text3)', fontSize: 11, padding: 0, fontWeight: 600 }}>
                 · Logout
               </button>
             </div>
@@ -187,12 +216,11 @@ export default function Dashboard() {
                 </form>
               </div>
 
-              {/* How it works */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  { icon: '📋', title: 'Paste Code', desc: 'Enter your SportyBet booking code' },
-                  { icon: '🤖', title: 'AI Analyses', desc: 'Searches real form, injuries & stats' },
-                  { icon: '🎯', title: 'Get New Code', desc: 'Fresh code with the safe picks only' },
+                  { icon: '📊', title: 'Real Data Analysis', desc: 'Uses BSD + Sofascore real match data' },
+                  { icon: '🤖', title: 'AI Punter Thinking', desc: 'Removes low-confidence picks for safety' },
+                  { icon: '🎯', title: 'Fresh Booking Code', desc: 'New code with only the safe picks' },
                 ].map(item => (
                   <div key={item.title} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderRadius: 12, padding: '12px 14px', border: '1px solid var(--border)' }}>
                     <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{item.icon}</div>
@@ -214,7 +242,6 @@ export default function Dashboard() {
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '4px 10px', borderRadius: 6 }}>{slip.shareCode}</span>
               </div>
 
-              {/* Stats */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
                 {[
                   { label: 'Games', value: slip.games.length },
@@ -228,7 +255,6 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              {/* Games list */}
               <div className="card" style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', letterSpacing: '0.04em', marginBottom: 12 }}>ALL GAMES</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -247,10 +273,9 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Target odds */}
               <div style={{ background: '#fff', border: '2px solid var(--accent)', borderRadius: 16, padding: '16px' }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Set Target Odds</div>
-                <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14 }}>AI will remove risky games to reach your target</div>
+                <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14 }}>AI will remove low-confidence picks to reach your target</div>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                   {[5, 20, 50, 100, 500].map(odd => (
                     <button key={odd} onClick={() => setTargetOdds(String(odd))}
@@ -277,10 +302,16 @@ export default function Dashboard() {
           {step === 'analysing' && (
             <div className="fade-up" style={{ textAlign: 'center', padding: '60px 0' }}>
               <div style={{ width: 64, height: 64, borderRadius: 18, background: 'var(--accent-dim)', border: '2px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 28 }}>🤖</div>
-              <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Analysing Your Slip</h3>
-              <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 28 }}>Searching form, injuries & stats for each match...</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 260, margin: '0 auto' }}>
-                {['Reading match data...', 'Checking team form...', 'Assessing each pick...', 'Building clean slip...'].map(msg => (
+              <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Deep Analysis Running</h3>
+              <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 28 }}>Checking real data from BSD and Sofascore for each match...</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 280, margin: '0 auto' }}>
+                {[
+                  'Searching BSD database...',
+                  'Checking Sofascore form data...',
+                  'Analysing H2H records...',
+                  'Evaluating confidence scores...',
+                  'Building safe slip...',
+                ].map(msg => (
                   <div key={msg} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--border)' }}>
                     <span className="spinner" />
                     <span style={{ fontSize: 13, color: 'var(--text2)' }}>{msg}</span>
@@ -339,19 +370,36 @@ export default function Dashboard() {
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.04em', marginBottom: 12 }}>
                   ✅ KEPT GAMES ({analysis.keptGames.length})
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {analysis.keptGames.map(g => (
                     <div key={g.eventId} style={{ padding: '12px', borderRadius: 10, background: 'rgba(22,163,74,0.04)', border: '1px solid rgba(22,163,74,0.15)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                         <div style={{ fontWeight: 700, fontSize: 13, flex: 1, paddingRight: 8 }}>{g.homeTeam} vs {g.awayTeam}</div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                           <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: 'var(--accent)' }}>{g.odds}</span>
                           <span className={`tag tag-${g.riskLevel.toLowerCase()}`}>{g.riskLevel}</span>
                         </div>
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>{g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.pick}</strong></div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>💡 {g.reason}</div>
-                      {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>📊 {g.formSummary}</div>}
+
+                      {/* Confidence bar */}
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600 }}>CONFIDENCE</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor(g.confidenceScore) }}>{g.confidenceScore}%</span>
+                        </div>
+                        <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2, transition: 'width 0.5s ease' }} />
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>
+                        {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.pick}</strong>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 4 }}>💡 {g.reason}</div>
+                      {g.formSummary && (
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>
+                      )}
+                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{dataSourceLabel(g.dataSource)}</div>
                     </div>
                   ))}
                 </div>
@@ -363,19 +411,34 @@ export default function Dashboard() {
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--red)', letterSpacing: '0.04em', marginBottom: 12 }}>
                     ❌ REMOVED BAD EGGS ({analysis.removedGames.length})
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {analysis.removedGames.map(g => (
                       <div key={g.eventId} style={{ padding: '12px', borderRadius: 10, background: 'rgba(220,38,38,0.04)', border: '1px solid rgba(220,38,38,0.15)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                           <div style={{ fontWeight: 700, fontSize: 13, textDecoration: 'line-through', color: 'var(--text3)', flex: 1, paddingRight: 8 }}>{g.homeTeam} vs {g.awayTeam}</div>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: 'var(--red)' }}>{g.odds}</span>
                             <span className={`tag tag-${g.riskLevel.toLowerCase()}`}>{g.riskLevel}</span>
                           </div>
                         </div>
+
+                        {/* Confidence bar */}
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600 }}>CONFIDENCE</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor(g.confidenceScore) }}>{g.confidenceScore}%</span>
+                          </div>
+                          <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2 }} />
+                          </div>
+                        </div>
+
                         <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>{g.league} · Pick: {g.pick}</div>
-                        <div style={{ fontSize: 12, color: 'var(--red)', fontStyle: 'italic' }}>⚠ {g.reason}</div>
-                        {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>📊 {g.formSummary}</div>}
+                        <div style={{ fontSize: 12, color: 'var(--red)', fontStyle: 'italic', marginBottom: 4 }}>⚠ {g.reason}</div>
+                        {g.formSummary && (
+                          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>
+                        )}
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{dataSourceLabel(g.dataSource)}</div>
                       </div>
                     ))}
                   </div>
