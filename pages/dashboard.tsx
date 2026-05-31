@@ -176,7 +176,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>⚡</div>
             <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-0.02em' }}>
-              Sporty<span style={{ color: 'var(--accent)' }}>AI</span>
+              Groove <span style={{ color: 'var(--accent)' }}>Slip</span>
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -61,7 +61,7 @@ export default function AdminPage() {
 
   return (
     <>
-      <Head><title>SportyAI Admin</title></Head>
+      <Head><title>Groove Slip Admin</title></Head>
       <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
         <nav style={{
           background: '#fff', borderBottom: '1px solid var(--border)',
@@ -73,7 +73,7 @@ export default function AdminPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>⚡</div>
             <div>
-              <span style={{ fontWeight: 800, fontSize: 15 }}>Sporty<span style={{ color: 'var(--accent)' }}>AI</span></span>
+              <span style={{ fontWeight: 800, fontSize: 16 }}>Groove <span style={{ color: 'var(--accent)' }}>Slip</span></span>
               <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 6 }}>Admin</span>
             </div>
           </div>

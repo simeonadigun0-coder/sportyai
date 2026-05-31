@@ -53,14 +53,13 @@ const HEADERS = {
   'Content-Type': 'application/json',
 }
 
-// Fetch all available markets for a game from SportyBet
 export async function fetchEventMarkets(game: SportyBetGame): Promise<EventMarkets | null> {
   try {
     const payload = [{
       eventId: game.eventId,
-      marketId: game.marketId,
-      outcomeId: game.outcomeId,
-      specifier: game.specifier || null,
+      marketId: '1',
+      outcomeId: '1',
+      specifier: null,
     }]
 
     const res = await fetch('https://www.sportybet.com/api/ng/factsCenter/Outcomes', {
@@ -82,20 +81,22 @@ export async function fetchEventMarkets(game: SportyBetGame): Promise<EventMarke
       const market = m as Record<string, unknown>
       const rawOutcomes = (market.outcomes as unknown[]) || []
 
-      const outcomes: MarketOutcome[] = rawOutcomes.map((o: unknown) => {
-        const outcome = o as Record<string, unknown>
-        return {
-          id: String(outcome.id || ''),
-          odds: parseFloat(String(outcome.odds || 1)),
-          probability: parseFloat(String(outcome.probability || 0)),
-          desc: String(outcome.desc || ''),
-          isActive: outcome.isActive === 1 || outcome.isActive === true,
-        }
-      }).filter(o => o.isActive && o.odds > 1)
+      const outcomes: MarketOutcome[] = rawOutcomes
+        .map((o: unknown) => {
+          const outcome = o as Record<string, unknown>
+          return {
+            id: String(outcome.id || ''),
+            odds: parseFloat(String(outcome.odds || 1)),
+            probability: parseFloat(String(outcome.probability || 0)),
+            desc: String(outcome.desc || ''),
+            isActive: outcome.isActive === 1 || outcome.isActive === true,
+          }
+        })
+        .filter(o => o.isActive && o.odds > 1.0)
 
       return {
         id: String(market.id || ''),
-        desc: String(market.desc || ''),
+        desc: String(market.desc || market.name || ''),
         name: String(market.name || market.desc || ''),
         group: String(market.group || 'Main'),
         outcomes,
@@ -113,8 +114,6 @@ export async function fetchEventMarkets(game: SportyBetGame): Promise<EventMarke
   }
 }
 
-// Market replacement hierarchy — from risky to safer
-// Returns array of [marketDesc, outcomeDesc] pairs to try in order
 export function getSaferMarketOptions(
   currentMarketDesc: string,
   currentPick: string
@@ -126,12 +125,10 @@ export function getSaferMarketOptions(
   if (market.includes('over/under') || market === 'over/under goals') {
     const num = parseFloat(currentPick.replace(/[^0-9.]/g, ''))
     if (pick.startsWith('over')) {
-      // Step down the over line
       const saferLines = [num - 0.5, num - 1, num - 1.5, num - 2].filter(n => n >= 0.5)
       return saferLines.map(n => ({ marketDesc: 'Over/Under', outcomeDesc: `Over ${n}` }))
     }
     if (pick.startsWith('under')) {
-      // Step up the under line
       const saferLines = [num + 0.5, num + 1, num + 1.5, num + 2]
       return saferLines.map(n => ({ marketDesc: 'Over/Under', outcomeDesc: `Under ${n}` }))
     }
@@ -168,10 +165,10 @@ export function getSaferMarketOptions(
     }
   }
 
-  // Double Chance — already safe, step up if needed
+  // Double Chance
   if (market === 'double chance') {
     if (pick.includes('home/draw') || pick.includes('1x')) {
-      return [{ marketDesc: '1X2', outcomeDesc: 'Home' }] // go to original if we want more odds
+      return [{ marketDesc: '1X2', outcomeDesc: 'Home' }]
     }
     if (pick.includes('draw/away') || pick.includes('x2')) {
       return [{ marketDesc: '1X2', outcomeDesc: 'Away' }]
@@ -191,7 +188,7 @@ export function getSaferMarketOptions(
     }
   }
 
-  // 1X2 - 1UP or 2UP
+  // 1X2 1UP or 2UP
   if (market.includes('1up') || market.includes('2up')) {
     return [{ marketDesc: '1X2', outcomeDesc: currentPick }]
   }
@@ -206,7 +203,6 @@ export function getSaferMarketOptions(
   return []
 }
 
-// Find a safer replacement pick from available markets
 export function findSaferReplacement(
   eventMarkets: EventMarkets,
   currentMarketDesc: string,
@@ -216,7 +212,6 @@ export function findSaferReplacement(
   const saferOptions = getSaferMarketOptions(currentMarketDesc, currentPick)
 
   for (const option of saferOptions) {
-    // Find matching market
     const market = eventMarkets.markets.find(m => {
       const mDesc = m.desc.toLowerCase()
       const targetDesc = option.marketDesc.toLowerCase()
@@ -225,12 +220,10 @@ export function findSaferReplacement(
 
     if (!market) continue
 
-    // Find matching outcome
     const outcome = market.outcomes.find(o => {
       const oDesc = o.desc.toLowerCase()
       const targetDesc = option.outcomeDesc.toLowerCase()
 
-      // For Over/Under, match the number
       if (targetDesc.startsWith('over') || targetDesc.startsWith('under')) {
         const targetNum = parseFloat(targetDesc.replace(/[^0-9.]/g, ''))
         const oNum = parseFloat(oDesc.replace(/[^0-9.]/g, ''))
@@ -243,7 +236,6 @@ export function findSaferReplacement(
 
     if (!outcome) continue
 
-    // Only use if new odds are lower than current (safer = lower odds)
     if (outcome.odds < currentOdds && outcome.odds > 1.0) {
       return {
         marketId: market.id,

@@ -41,42 +41,46 @@ export default function AuthPage() {
   return (
     <>
       <Head>
-        <title>SportyAI — Smart Bet Slip Analyser</title>
+        <title>Groove Slip — Where Sharp Minds Meet Sharper Picks</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
 
       <div style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0fdf4 0%, #f8fafc 60%, #eff6ff 100%)',
+        background: 'linear-gradient(160deg, #f0fdf4 0%, #f8fafc 60%, #f0fdf4 100%)',
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         padding: '24px 16px',
       }}>
         <div className="fade-up" style={{ width: '100%', maxWidth: 400 }}>
 
+          {/* Logo */}
           <div style={{ textAlign: 'center', marginBottom: 28 }}>
             <div style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 52, height: 52, borderRadius: 14,
-              background: 'var(--accent)', marginBottom: 12,
-              boxShadow: '0 4px 16px rgba(22,163,74,0.30)',
+              width: 56, height: 56, borderRadius: 16,
+              background: 'var(--accent)', marginBottom: 14,
+              boxShadow: '0 4px 20px rgba(22,163,74,0.35)',
             }}>
-              <span style={{ fontSize: 24 }}>⚡</span>
+              <span style={{ fontSize: 26 }}>⚡</span>
             </div>
-            <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--navy)' }}>
-              Sporty<span style={{ color: 'var(--accent)' }}>AI</span>
+            <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--navy)', marginBottom: 6 }}>
+              Groove Slip
             </h1>
-            <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4 }}>
-              AI-powered bet slip analyser
+            <p style={{ color: 'var(--text2)', fontSize: 14, fontStyle: 'italic' }}>
+              Where sharp minds meet sharper picks
             </p>
           </div>
 
+          {/* Card */}
           <div style={{
             background: '#fff', borderRadius: 20,
             padding: '24px 20px',
             boxShadow: '0 8px 40px rgba(0,0,0,0.08)',
             border: '1px solid var(--border)',
+            marginBottom: 16,
           }}>
+            {/* Tabs */}
             <div style={{
               display: 'flex', gap: 4,
               background: 'var(--bg)',
@@ -151,15 +155,16 @@ export default function AuthPage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+          {/* Features */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[
-              { icon: '🤖', text: 'AI analyses real team form and injuries' },
-              { icon: '🎯', text: 'Removes bad eggs from your slip' },
-              { icon: '⚡', text: 'Generates a fresh SportyBet code' },
+              { icon: '📈', text: 'Reads team form, injuries & head-to-head history like a seasoned scout' },
+              { icon: '🚩', text: 'Flags the weak legs on your slip before they cost you' },
+              { icon: '🔄', text: 'Returns a fresh SportyBet code with stronger selections' },
             ].map(item => (
-              <div key={item.text} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--border)' }}>
-                <span style={{ fontSize: 16 }}>{item.icon}</span>
-                <span style={{ fontSize: 13, color: 'var(--text2)' }}>{item.text}</span>
+              <div key={item.text} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderRadius: 12, padding: '12px 14px', border: '1px solid var(--border)' }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{item.icon}</div>
+                <span style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{item.text}</span>
               </div>
             ))}
           </div>
