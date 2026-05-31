@@ -9,10 +9,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = requireAuth(req, res)
   if (!user) return
 
-  const { games, targetOdds, originalTotalOdds } = req.body as {
+  const { games, targetOdds, originalTotalOdds, allowSwitching } = req.body as {
     games: SportyBetGame[]
     targetOdds: number
     originalTotalOdds: number
+    allowSwitching: boolean
   }
 
   if (!games || !Array.isArray(games) || games.length === 0) {
@@ -24,7 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const analysis = await analyseSlip(games, targetOdds, originalTotalOdds)
+    const analysis = await analyseSlip(games, targetOdds, originalTotalOdds, allowSwitching || false)
     return res.status(200).json(analysis)
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'AI analysis failed'

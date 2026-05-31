@@ -25,6 +25,9 @@ interface GameAnalysis extends Game {
   formSummary: string
   keep: boolean
   dataSource: string
+  suggestedPick?: string
+  suggestedOdds?: number
+  switchSuggestion?: string
 }
 
 interface SlipAnalysis {
@@ -46,6 +49,7 @@ export default function Dashboard() {
   const [step, setStep] = useState<Step>('input')
   const [code, setCode] = useState('')
   const [targetOdds, setTargetOdds] = useState('')
+  const [allowSwitching, setAllowSwitching] = useState<boolean | null>(null)
   const [slip, setSlip] = useState<{ shareCode: string; totalOdds: number; games: Game[] } | null>(null)
   const [analysis, setAnalysis] = useState<SlipAnalysis | null>(null)
   const [newCode, setNewCode] = useState('')
@@ -79,7 +83,9 @@ export default function Dashboard() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to decode')
       if (!data.games?.length) throw new Error('No games found in this booking code')
-      setSlip(data); setStep('decoded')
+      setSlip(data)
+      setAllowSwitching(null) // reset consent
+      setStep('decoded')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to decode')
     } finally { setLoading(false) }
@@ -88,17 +94,24 @@ export default function Dashboard() {
   const handleAnalyse = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!slip) return
+    if (allowSwitching === null) { setError('Please choose what AI should do with risky picks'); return }
     const target = parseFloat(targetOdds)
     if (!target || target < 1) { setError('Enter valid target odds'); return }
     setLoading(true); setError(''); setStep('analysing')
     try {
       const res = await fetch('/api/analyse', {
         method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ games: slip.games, targetOdds: target, originalTotalOdds: slip.totalOdds }),
+        body: JSON.stringify({
+          games: slip.games,
+          targetOdds: target,
+          originalTotalOdds: slip.totalOdds,
+          allowSwitching,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setAnalysis(data)
+
       if (data.keptGames?.length > 0) {
         const rebookRes = await fetch('/api/rebook', {
           method: 'POST', headers: authHeaders(),
@@ -116,7 +129,8 @@ export default function Dashboard() {
 
   const reset = () => {
     setStep('input'); setCode(''); setTargetOdds('')
-    setSlip(null); setAnalysis(null); setNewCode(''); setError(''); setCopied(false)
+    setSlip(null); setAnalysis(null); setNewCode('')
+    setError(''); setCopied(false); setAllowSwitching(null)
   }
 
   const logout = async () => {
@@ -180,12 +194,8 @@ export default function Dashboard() {
           {step === 'input' && (
             <div className="fade-up">
               <div style={{ marginBottom: 20 }}>
-                <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 4 }}>
-                  Analyse Your Slip
-                </h2>
-                <p style={{ color: 'var(--text2)', fontSize: 14 }}>
-                  Paste your SportyBet booking code below
-                </p>
+                <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 4 }}>Analyse Your Slip</h2>
+                <p style={{ color: 'var(--text2)', fontSize: 14 }}>Paste your SportyBet booking code below</p>
               </div>
 
               <div className="card" style={{ marginBottom: 16 }}>
@@ -218,9 +228,9 @@ export default function Dashboard() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  { icon: '📊', title: 'Real Data Analysis', desc: 'Uses BSD + Sofascore real match data' },
-                  { icon: '🤖', title: 'AI Punter Thinking', desc: 'Removes low-confidence picks for safety' },
-                  { icon: '🎯', title: 'Fresh Booking Code', desc: 'New code with only the safe picks' },
+                  { icon: '📊', title: 'Real Data Analysis', desc: 'BSD + Sofascore real match statistics' },
+                  { icon: '🤖', title: 'Smart Odds Targeting', desc: 'Lands close to your desired odds' },
+                  { icon: '🎯', title: 'Fresh Booking Code', desc: 'New clean code instantly generated' },
                 ].map(item => (
                   <div key={item.title} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderRadius: 12, padding: '12px 14px', border: '1px solid var(--border)' }}>
                     <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{item.icon}</div>
@@ -255,6 +265,7 @@ export default function Dashboard() {
                 ))}
               </div>
 
+              {/* Games list */}
               <div className="card" style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', letterSpacing: '0.04em', marginBottom: 12 }}>ALL GAMES</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -273,9 +284,48 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              {/* CONSENT QUESTION */}
+              <div style={{ background: '#fff', border: '2px solid var(--navy)', borderRadius: 14, padding: '16px', marginBottom: 14 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, color: 'var(--navy)' }}>
+                  🤔 When AI finds a risky pick, what should it do?
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.5 }}>
+                  This choice affects how the AI handles low-confidence games on your slip.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button
+                    onClick={() => setAllowSwitching(false)}
+                    style={{
+                      padding: '12px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                      textAlign: 'left', cursor: 'pointer',
+                      background: allowSwitching === false ? 'rgba(220,38,38,0.08)' : 'var(--bg)',
+                      border: allowSwitching === false ? '2px solid var(--red)' : '1.5px solid var(--border)',
+                      color: 'var(--text)',
+                    }}>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>🗑️ Remove the game</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>Remove risky picks entirely from the slip</div>
+                  </button>
+                  <button
+                    onClick={() => setAllowSwitching(true)}
+                    style={{
+                      padding: '12px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                      textAlign: 'left', cursor: 'pointer',
+                      background: allowSwitching === true ? 'var(--accent-dim)' : 'var(--bg)',
+                      border: allowSwitching === true ? '2px solid var(--accent)' : '1.5px solid var(--border)',
+                      color: 'var(--text)',
+                    }}>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>🔄 Suggest a safer pick</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>AI recommends a safer option on the same match</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Target odds */}
               <div style={{ background: '#fff', border: '2px solid var(--accent)', borderRadius: 16, padding: '16px' }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Set Target Odds</div>
-                <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14 }}>AI will remove low-confidence picks to reach your target</div>
+                <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14 }}>
+                  AI will aim to land close to your target — slightly above or below is fine
+                </div>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                   {[5, 20, 50, 100, 500].map(odd => (
                     <button key={odd} onClick={() => setTargetOdds(String(odd))}
@@ -290,9 +340,14 @@ export default function Dashboard() {
                     onChange={e => setTargetOdds(e.target.value)}
                     min={1} step="any" required />
                   {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div>}
-                  <button type="submit" className="btn-primary" disabled={loading}>
-                    🤖 Analyse & Remove Bad Eggs
+                  <button type="submit" className="btn-primary" disabled={loading || allowSwitching === null}>
+                    🤖 Analyse & Clean Slip
                   </button>
+                  {allowSwitching === null && (
+                    <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' }}>
+                      ↑ Choose what to do with risky picks first
+                    </div>
+                  )}
                 </form>
               </div>
             </div>
@@ -303,15 +358,11 @@ export default function Dashboard() {
             <div className="fade-up" style={{ textAlign: 'center', padding: '60px 0' }}>
               <div style={{ width: 64, height: 64, borderRadius: 18, background: 'var(--accent-dim)', border: '2px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 28 }}>🤖</div>
               <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Deep Analysis Running</h3>
-              <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 28 }}>Checking real data from BSD and Sofascore for each match...</p>
+              <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 28 }}>
+                {allowSwitching ? 'Finding safer alternatives for risky picks...' : 'Identifying and removing bad eggs...'}
+              </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 280, margin: '0 auto' }}>
-                {[
-                  'Searching BSD database...',
-                  'Checking Sofascore form data...',
-                  'Analysing H2H records...',
-                  'Evaluating confidence scores...',
-                  'Building safe slip...',
-                ].map(msg => (
+                {['Searching BSD database...', 'Checking Sofascore form...', 'Analysing H2H records...', 'Targeting your desired odds...', 'Building clean slip...'].map(msg => (
                   <div key={msg} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--border)' }}>
                     <span className="spinner" />
                     <span style={{ fontSize: 13, color: 'var(--text2)' }}>{msg}</span>
@@ -324,7 +375,6 @@ export default function Dashboard() {
           {/* STEP 4: Results */}
           {step === 'result' && analysis && (
             <div className="fade-up">
-              {/* New Code */}
               {newCode ? (
                 <div style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', border: '2px solid var(--accent)', borderRadius: 18, padding: '20px', marginBottom: 16, textAlign: 'center' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.06em', marginBottom: 6 }}>✅ NEW BOOKING CODE</div>
@@ -344,7 +394,6 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* Stats */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 14 }}>
                 {[
                   { label: 'Original Odds', value: analysis.originalOdds, color: 'var(--text2)' },
@@ -359,7 +408,6 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              {/* AI Summary */}
               <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px', marginBottom: 14, display: 'flex', gap: 10 }}>
                 <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
                 <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }}>{analysis.summary}</p>
@@ -381,14 +429,13 @@ export default function Dashboard() {
                         </div>
                       </div>
 
-                      {/* Confidence bar */}
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600 }}>CONFIDENCE</span>
                           <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor(g.confidenceScore) }}>{g.confidenceScore}%</span>
                         </div>
                         <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2, transition: 'width 0.5s ease' }} />
+                          <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2 }} />
                         </div>
                       </div>
 
@@ -396,10 +443,8 @@ export default function Dashboard() {
                         {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.pick}</strong>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 4 }}>💡 {g.reason}</div>
-                      {g.formSummary && (
-                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>
-                      )}
-                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{dataSourceLabel(g.dataSource)}</div>
+                      {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>}
+                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>{dataSourceLabel(g.dataSource)}</div>
                     </div>
                   ))}
                 </div>
@@ -422,7 +467,6 @@ export default function Dashboard() {
                           </div>
                         </div>
 
-                        {/* Confidence bar */}
                         <div style={{ marginBottom: 8 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600 }}>CONFIDENCE</span>
@@ -435,9 +479,18 @@ export default function Dashboard() {
 
                         <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>{g.league} · Pick: {g.pick}</div>
                         <div style={{ fontSize: 12, color: 'var(--red)', fontStyle: 'italic', marginBottom: 4 }}>⚠ {g.reason}</div>
-                        {g.formSummary && (
-                          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>
+                        {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>}
+
+                        {/* Switch suggestion */}
+                        {g.suggestedPick && g.switchSuggestion && (
+                          <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>
+                              🔄 Safer option: {g.suggestedPick} {g.suggestedOdds ? `(~${g.suggestedOdds} odds)` : ''}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text2)' }}>{g.switchSuggestion}</div>
+                          </div>
                         )}
+
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{dataSourceLabel(g.dataSource)}</div>
                       </div>
                     ))}
