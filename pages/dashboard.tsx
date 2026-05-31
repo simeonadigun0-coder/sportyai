@@ -28,6 +28,13 @@ interface GameAnalysis extends Game {
   suggestedPick?: string
   suggestedOdds?: number
   switchSuggestion?: string
+  replaced?: boolean
+  replacedMarketId?: string
+  replacedOutcomeId?: string
+  replacedMarketDesc?: string
+  replacedPick?: string
+  replacedOdds?: number
+  replacementReason?: string
 }
 
 interface SlipAnalysis {
@@ -84,7 +91,7 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(data.error || 'Failed to decode')
       if (!data.games?.length) throw new Error('No games found in this booking code')
       setSlip(data)
-      setAllowSwitching(null) // reset consent
+      setAllowSwitching(null)
       setStep('decoded')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to decode')
@@ -287,7 +294,7 @@ export default function Dashboard() {
               {/* CONSENT QUESTION */}
               <div style={{ background: '#fff', border: '2px solid var(--navy)', borderRadius: 14, padding: '16px', marginBottom: 14 }}>
                 <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, color: 'var(--navy)' }}>
-                  🤔 When AI finds a risky pick, what should it do?
+                  🤔 When i find a risky pick, what should i do?
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.5 }}>
                   This choice affects how the AI handles low-confidence games on your slip.
@@ -420,14 +427,26 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {analysis.keptGames.map(g => (
-                    <div key={g.eventId} style={{ padding: '12px', borderRadius: 10, background: 'rgba(22,163,74,0.04)', border: '1px solid rgba(22,163,74,0.15)' }}>
+                    <div key={g.eventId} style={{ padding: '12px', borderRadius: 10, background: g.replaced ? 'rgba(59,130,246,0.04)' : 'rgba(22,163,74,0.04)', border: `1px solid ${g.replaced ? 'rgba(59,130,246,0.2)' : 'rgba(22,163,74,0.15)'}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                         <div style={{ fontWeight: 700, fontSize: 13, flex: 1, paddingRight: 8 }}>{g.homeTeam} vs {g.awayTeam}</div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: 'var(--accent)' }}>{g.odds}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: g.replaced ? '#3b82f6' : 'var(--accent)' }}>{g.replaced ? (g.replacedOdds || g.odds) : g.odds}</span>
                           <span className={`tag tag-${g.riskLevel.toLowerCase()}`}>{g.riskLevel}</span>
                         </div>
                       </div>
+
+                      {/* Replacement badge */}
+                      {g.replaced && (
+                        <div style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6', marginBottom: 2 }}>🔄 Pick Replaced (Safer Option)</div>
+                          <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                            <span style={{ textDecoration: 'line-through', color: 'var(--text3)' }}>{g.pick} ({g.market})</span>
+                            {' → '}
+                            <strong>{g.replacedPick} ({g.replacedMarketDesc})</strong>
+                          </div>
+                        </div>
+                      )}
 
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -440,9 +459,11 @@ export default function Dashboard() {
                       </div>
 
                       <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>
-                        {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.pick}</strong>
+                        {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.replaced ? g.replacedPick : g.pick}</strong>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 4 }}>💡 {g.reason}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 4 }}>
+                        💡 {g.replaced ? g.replacementReason : g.reason}
+                      </div>
                       {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>}
                       <div style={{ fontSize: 10, color: 'var(--text3)' }}>{dataSourceLabel(g.dataSource)}</div>
                     </div>
