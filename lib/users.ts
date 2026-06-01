@@ -9,7 +9,7 @@ export interface User {
   email: string
   passwordHash: string
   createdAt: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'paused'
   isAdmin: boolean
 }
 
@@ -29,14 +29,12 @@ export async function findUserById(id: string): Promise<User | undefined> {
 }
 
 export async function getAllUsers(): Promise<User[]> {
-  // Get from both user:id:* and user:email:* to catch all users
   const idKeys = await redis.keys('user:id:*')
   const emailKeys = await redis.keys('user:email:*')
 
   const allUsers: User[] = []
   const seenIds = new Set<string>()
 
-  // First get users by ID keys
   if (idKeys.length) {
     const users = await Promise.all(idKeys.map(k => redis.get<User>(k)))
     for (const u of users) {
@@ -47,20 +45,17 @@ export async function getAllUsers(): Promise<User[]> {
     }
   }
 
-  // Then get users by email keys (catches old registrations)
   if (emailKeys.length) {
     const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
     for (const u of users) {
       if (u && u.id && !seenIds.has(u.id)) {
         seenIds.add(u.id)
-        // Fix missing fields for old users
         const fixed: User = {
           ...u,
           status: u.status || 'approved',
           isAdmin: u.email?.toLowerCase() === 'simeonadigun0@gmail.com',
         }
         allUsers.push(fixed)
-        // Also save with id key so future lookups work
         await redis.set(`user:id:${u.id}`, fixed)
       }
     }
@@ -69,11 +64,12 @@ export async function getAllUsers(): Promise<User[]> {
   return allUsers
 }
 
-export async function updateUserStatus(id: string, status: 'pending' | 'approved' | 'rejected'): Promise<void> {
-  // Try finding by id key first
+export async function updateUserStatus(
+  id: string,
+  status: 'pending' | 'approved' | 'rejected' | 'paused'
+): Promise<void> {
   let user = await findUserById(id)
 
-  // Fallback — search email keys
   if (!user) {
     const emailKeys = await redis.keys('user:email:*')
     const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
@@ -88,7 +84,27 @@ export async function updateUserStatus(id: string, status: 'pending' | 'approved
   await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
 }
 
-export async function createUser(username: string, email: string, password: string): Promise<User> {
+export async function deleteUser(id: string): Promise<void> {
+  let user = await findUserById(id)
+
+  if (!user) {
+    const emailKeys = await redis.keys('user:email:*')
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    user = users.find(u => u?.id === id) as User | undefined
+  }
+
+  if (!user) return
+
+  await redis.del(`user:id:${id}`)
+  await redis.del(`user:email:${user.email.toLowerCase()}`)
+  await redis.del(`user:username:${user.username.toLowerCase()}`)
+}
+
+export async function createUser(
+  username: string,
+  email: string,
+  password: string
+): Promise<User> {
   const passwordHash = bcrypt.hashSync(password, 10)
   const isAdmin = email.toLowerCase() === 'simeonadigun0@gmail.com'
 

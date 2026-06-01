@@ -101,7 +101,7 @@ export default function Dashboard() {
   const handleAnalyse = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!slip) return
-    if (allowSwitching === null) { setError('Please choose what AI should do with risky picks'); return }
+    if (allowSwitching === null) { setError('Please choose what i should do with risky picks'); return }
     const target = parseFloat(targetOdds)
     if (!target || target < 1) { setError('Enter valid target odds'); return }
     setLoading(true); setError(''); setStep('analysing')
@@ -160,7 +160,7 @@ export default function Dashboard() {
   return (
     <>
       <Head>
-        <title>SportyAI</title>
+        <title>Groove Slip</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
 
@@ -297,7 +297,7 @@ export default function Dashboard() {
                   🤔 When i find a risky pick, what should i do?
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.5 }}>
-                  This choice affects how the AI handles low-confidence games on your slip.
+                  This choice affects how i handles low-confidence games on your slip.
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button
@@ -321,8 +321,8 @@ export default function Dashboard() {
                       border: allowSwitching === true ? '2px solid var(--accent)' : '1.5px solid var(--border)',
                       color: 'var(--text)',
                     }}>
-                    <div style={{ fontWeight: 700, marginBottom: 2 }}>🔄 Suggest a safer pick</div>
-                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>AI recommends a safer option on the same match</div>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>🔄 Replace risky pick with a safer one</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>I would replace low confidence pick with a safer pick on the same match</div>
                   </button>
                 </div>
               </div>
