@@ -482,7 +482,7 @@ export async function analyseSlip(
             replacedMarketDesc: replacement.marketDesc,
             replacedPick: replacement.pickDesc,
             replacedOdds: replacement.odds,
-            replacementReason: `"${game.pick}" (${game.market}) at ${game.odds} had ${result.confidenceScore}% confidence. Safer option: "${replacement.pickDesc}" (${replacement.marketDesc}) at ${replacement.odds}.`,
+            replacementReason: `"${game.pick}" (${game.market}) at ${game.odds} had ${result?.confidenceScore ?? 55}% confidence. Safer option: "${replacement.pickDesc}" (${replacement.marketDesc}) at ${replacement.odds}.`,
           }
         }
       }
