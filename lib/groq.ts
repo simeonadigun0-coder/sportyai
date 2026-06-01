@@ -466,7 +466,7 @@ export async function analyseSlip(
     }
 
     // Apply replacement if switching mode
-    if (allowSwitching && result && result.confidenceScore < 75) {
+    if (allowSwitching) {
       const eventMarkets = eventMarketsMap.get(game.eventId)
       if (eventMarkets) {
         const replacement = findSaferReplacement(

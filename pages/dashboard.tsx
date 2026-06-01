@@ -25,9 +25,6 @@ interface GameAnalysis extends Game {
   formSummary: string
   keep: boolean
   dataSource: string
-  suggestedPick?: string
-  suggestedOdds?: number
-  switchSuggestion?: string
   replaced?: boolean
   replacedMarketId?: string
   replacedOutcomeId?: string
@@ -101,7 +98,7 @@ export default function Dashboard() {
   const handleAnalyse = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!slip) return
-    if (allowSwitching === null) { setError('Please choose what i should do with risky picks'); return }
+    if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
     const target = parseFloat(targetOdds)
     if (!target || target < 1) { setError('Enter valid target odds'); return }
     setLoading(true); setError(''); setStep('analysing')
@@ -201,8 +198,12 @@ export default function Dashboard() {
           {step === 'input' && (
             <div className="fade-up">
               <div style={{ marginBottom: 20 }}>
-                <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 4 }}>Analyse Your Slip</h2>
-                <p style={{ color: 'var(--text2)', fontSize: 14 }}>Paste your SportyBet booking code below</p>
+                <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 4 }}>
+                  Analyse Your Slip
+                </h2>
+                <p style={{ color: 'var(--text2)', fontSize: 14 }}>
+                  Paste your SportyBet booking code below
+                </p>
               </div>
 
               <div className="card" style={{ marginBottom: 16 }}>
@@ -236,7 +237,7 @@ export default function Dashboard() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
                   { icon: '📊', title: 'Real Data Analysis', desc: 'BSD + Sofascore real match statistics' },
-                  { icon: '🤖', title: 'Smart Odds Targeting', desc: 'Lands close to your desired odds' },
+                  { icon: '🔄', title: 'Smart Pick Replacement', desc: 'Swaps risky picks for safer alternatives' },
                   { icon: '🎯', title: 'Fresh Booking Code', desc: 'New clean code instantly generated' },
                 ].map(item => (
                   <div key={item.title} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderRadius: 12, padding: '12px 14px', border: '1px solid var(--border)' }}>
@@ -291,7 +292,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* CONSENT QUESTION */}
+              {/* Consent question */}
               <div style={{ background: '#fff', border: '2px solid var(--navy)', borderRadius: 14, padding: '16px', marginBottom: 14 }}>
                 <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, color: 'var(--navy)' }}>
                   🤔 When i find a risky pick, what should i do?
@@ -303,9 +304,9 @@ export default function Dashboard() {
                   <button
                     onClick={() => setAllowSwitching(false)}
                     style={{
-                      padding: '12px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                      padding: '12px 14px', borderRadius: 10, fontSize: 13,
                       textAlign: 'left', cursor: 'pointer',
-                      background: allowSwitching === false ? 'rgba(220,38,38,0.08)' : 'var(--bg)',
+                      background: allowSwitching === false ? 'rgba(220,38,38,0.06)' : 'var(--bg)',
                       border: allowSwitching === false ? '2px solid var(--red)' : '1.5px solid var(--border)',
                       color: 'var(--text)',
                     }}>
@@ -315,14 +316,14 @@ export default function Dashboard() {
                   <button
                     onClick={() => setAllowSwitching(true)}
                     style={{
-                      padding: '12px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                      padding: '12px 14px', borderRadius: 10, fontSize: 13,
                       textAlign: 'left', cursor: 'pointer',
                       background: allowSwitching === true ? 'var(--accent-dim)' : 'var(--bg)',
                       border: allowSwitching === true ? '2px solid var(--accent)' : '1.5px solid var(--border)',
                       color: 'var(--text)',
                     }}>
                     <div style={{ fontWeight: 700, marginBottom: 2 }}>🔄 Replace risky pick with a safer one</div>
-                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>I would replace low confidence pick with a safer pick on the same match</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>I will replace low confidence pick with a safer pick on the same match</div>
                   </button>
                 </div>
               </div>
@@ -366,10 +367,18 @@ export default function Dashboard() {
               <div style={{ width: 64, height: 64, borderRadius: 18, background: 'var(--accent-dim)', border: '2px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 28 }}>🤖</div>
               <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Deep Analysis Running</h3>
               <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 28 }}>
-                {allowSwitching ? 'Finding safer alternatives for risky picks...' : 'Identifying and removing bad eggs...'}
+                {allowSwitching
+                  ? 'Finding safer alternatives for risky picks...'
+                  : 'Identifying and removing bad eggs...'}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 280, margin: '0 auto' }}>
-                {['Searching BSD database...', 'Checking Sofascore form...', 'Analysing H2H records...', 'Targeting your desired odds...', 'Building clean slip...'].map(msg => (
+                {[
+                  'Searching BSD database...',
+                  'Checking Sofascore form...',
+                  'Analysing H2H records...',
+                  allowSwitching ? 'Finding safer market options...' : 'Targeting your desired odds...',
+                  'Building clean slip...',
+                ].map(msg => (
                   <div key={msg} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--border)' }}>
                     <span className="spinner" />
                     <span style={{ fontSize: 13, color: 'var(--text2)' }}>{msg}</span>
@@ -382,6 +391,7 @@ export default function Dashboard() {
           {/* STEP 4: Results */}
           {step === 'result' && analysis && (
             <div className="fade-up">
+              {/* New Code */}
               {newCode ? (
                 <div style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', border: '2px solid var(--accent)', borderRadius: 18, padding: '20px', marginBottom: 16, textAlign: 'center' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.06em', marginBottom: 6 }}>✅ NEW BOOKING CODE</div>
@@ -401,6 +411,7 @@ export default function Dashboard() {
                 </div>
               )}
 
+              {/* Stats */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 14 }}>
                 {[
                   { label: 'Original Odds', value: analysis.originalOdds, color: 'var(--text2)' },
@@ -415,6 +426,20 @@ export default function Dashboard() {
                 ))}
               </div>
 
+              {/* Replaced count banner */}
+              {analysis.keptGames.filter(g => g.replaced).length > 0 && (
+                <div style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(99,102,241,0.06))', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>🔄</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#3b82f6' }}>
+                      {analysis.keptGames.filter(g => g.replaced).length} pick{analysis.keptGames.filter(g => g.replaced).length > 1 ? 's' : ''} replaced with safer options
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)' }}>Look for the 🔄 PICK CHANGED badge below</div>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Summary */}
               <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px', marginBottom: 14, display: 'flex', gap: 10 }}>
                 <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
                 <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }}>{analysis.summary}</p>
@@ -427,44 +452,85 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {analysis.keptGames.map(g => (
-                    <div key={g.eventId} style={{ padding: '12px', borderRadius: 10, background: g.replaced ? 'rgba(59,130,246,0.04)' : 'rgba(22,163,74,0.04)', border: `1px solid ${g.replaced ? 'rgba(59,130,246,0.2)' : 'rgba(22,163,74,0.15)'}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, flex: 1, paddingRight: 8 }}>{g.homeTeam} vs {g.awayTeam}</div>
+                    <div key={g.eventId} style={{
+                      padding: '14px',
+                      borderRadius: 12,
+                      background: g.replaced
+                        ? 'linear-gradient(135deg, rgba(59,130,246,0.06), rgba(99,102,241,0.04))'
+                        : 'rgba(22,163,74,0.04)',
+                      border: `2px solid ${g.replaced ? 'rgba(59,130,246,0.3)' : 'rgba(22,163,74,0.15)'}`,
+                      position: 'relative',
+                    }}>
+                      {/* Replaced badge */}
+                      {g.replaced && (
+                        <div style={{
+                          position: 'absolute', top: -1, right: 10,
+                          background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                          color: '#fff', fontSize: 10, fontWeight: 800,
+                          padding: '2px 8px', borderRadius: '0 0 6px 6px',
+                          letterSpacing: '0.05em',
+                        }}>
+                          🔄 PICK CHANGED
+                        </div>
+                      )}
+
+                      {/* Match name + odds */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, marginTop: g.replaced ? 8 : 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, flex: 1, paddingRight: 8 }}>
+                          {g.homeTeam} vs {g.awayTeam}
+                        </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: g.replaced ? '#3b82f6' : 'var(--accent)' }}>{g.replaced ? (g.replacedOdds || g.odds) : g.odds}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 16, color: g.replaced ? '#3b82f6' : 'var(--accent)' }}>
+                            {g.replaced ? (g.replacedOdds || g.odds) : g.odds}
+                          </span>
                           <span className={`tag tag-${g.riskLevel.toLowerCase()}`}>{g.riskLevel}</span>
                         </div>
                       </div>
 
-                      {/* Replacement badge */}
-                      {g.replaced && (
-                        <div style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6', marginBottom: 2 }}>🔄 Pick Replaced (Safer Option)</div>
-                          <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-                            <span style={{ textDecoration: 'line-through', color: 'var(--text3)' }}>{g.pick} ({g.market})</span>
-                            {' → '}
-                            <strong>{g.replacedPick} ({g.replacedMarketDesc})</strong>
+                      {/* Pick change display */}
+                      {g.replaced ? (
+                        <div style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 10, padding: '10px 12px', marginBottom: 10 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6366f1', marginBottom: 6, letterSpacing: '0.04em' }}>
+                            PICK CHANGED TO SAFER OPTION
                           </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <div style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 10px', fontSize: 12, color: '#dc2626', textDecoration: 'line-through' }}>
+                              {g.pick} ({g.market}) @ {g.odds}
+                            </div>
+                            <span style={{ fontSize: 14, color: 'var(--text3)' }}>→</span>
+                            <div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: 12, color: '#3b82f6', fontWeight: 700 }}>
+                              {g.replacedPick} ({g.replacedMarketDesc}) @ {g.replacedOdds}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6366f1', marginTop: 6, fontStyle: 'italic' }}>
+                            💡 {g.replacementReason}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+                          {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.pick}</strong> ({g.market})
                         </div>
                       )}
 
+                      {/* Confidence bar */}
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600 }}>CONFIDENCE</span>
                           <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor(g.confidenceScore) }}>{g.confidenceScore}%</span>
                         </div>
                         <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2 }} />
+                          <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: g.replaced ? 'linear-gradient(90deg, #3b82f6, #6366f1)' : confidenceColor(g.confidenceScore), borderRadius: 2, transition: 'width 0.5s ease' }} />
                         </div>
                       </div>
 
-                      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>
-                        {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.replaced ? g.replacedPick : g.pick}</strong>
-                      </div>
                       <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 4 }}>
-                        💡 {g.replaced ? g.replacementReason : g.reason}
+                        💡 {g.reason}
                       </div>
-                      {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>}
+                      {g.formSummary && !g.replaced && (
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>
+                          📊 {g.formSummary}
+                        </div>
+                      )}
                       <div style={{ fontSize: 10, color: 'var(--text3)' }}>{dataSourceLabel(g.dataSource)}</div>
                     </div>
                   ))}
@@ -501,18 +567,7 @@ export default function Dashboard() {
                         <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>{g.league} · Pick: {g.pick}</div>
                         <div style={{ fontSize: 12, color: 'var(--red)', fontStyle: 'italic', marginBottom: 4 }}>⚠ {g.reason}</div>
                         {g.formSummary && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📊 {g.formSummary}</div>}
-
-                        {/* Switch suggestion */}
-                        {g.suggestedPick && g.switchSuggestion && (
-                          <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 8 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>
-                              🔄 Safer option: {g.suggestedPick} {g.suggestedOdds ? `(~${g.suggestedOdds} odds)` : ''}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text2)' }}>{g.switchSuggestion}</div>
-                          </div>
-                        )}
-
-                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{dataSourceLabel(g.dataSource)}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)' }}>{dataSourceLabel(g.dataSource)}</div>
                       </div>
                     ))}
                   </div>
