@@ -1,4 +1,3 @@
-import { findUserByEmail, verifyPassword, updateLastSeen } from '@/lib/users'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { findUserByEmail, verifyPassword } from '@/lib/users'
 import { signToken } from '@/lib/auth'
@@ -10,7 +9,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
 
   const user = await findUserByEmail(email)
-  updateLastSeen(user.id) // non-blocking
   if (!user || !verifyPassword(user, password))
     return res.status(401).json({ error: 'Invalid email or password' })
 
