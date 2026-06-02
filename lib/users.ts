@@ -127,3 +127,15 @@ export async function createUser(
 export function verifyPassword(user: User, password: string): boolean {
   return bcrypt.compareSync(password, user.passwordHash)
 }
+
+export async function updateLastSeen(userId: string): Promise<void> {
+  try {
+    await redis.set(`user:lastseen:${userId}`, new Date().toISOString())
+  } catch { /* non-critical */ }
+}
+
+export async function getLastSeen(userId: string): Promise<string | null> {
+  try {
+    return await redis.get<string>(`user:lastseen:${userId}`)
+  } catch { return null }
+}
