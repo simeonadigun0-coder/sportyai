@@ -9,6 +9,9 @@ interface User {
   status: 'pending' | 'approved' | 'rejected' | 'paused'
   isAdmin: boolean
   createdAt: string
+  lastSeen?: string
+  subscriptionWaived?: boolean
+  subscriptionExpiry?: string | null
 }
 
 export default function AdminPage() {
@@ -57,6 +60,12 @@ export default function AdminPage() {
       })
       await fetchUsers()
     } finally { setActionLoading(null) }
+  }
+
+  const isSubActive = (u: User) => {
+    if (u.isAdmin || u.subscriptionWaived) return true
+    if (!u.subscriptionExpiry) return false
+    return new Date(u.subscriptionExpiry) > new Date()
   }
 
   const nonAdminUsers = users.filter(u => !u.isAdmin)
@@ -129,7 +138,7 @@ export default function AdminPage() {
                 ))}
               </div>
 
-              {/* Pending Section */}
+              {/* Pending */}
               {pending.length > 0 && (
                 <div className="card" style={{ marginBottom: 14, border: '1.5px solid rgba(217,119,6,0.3)' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#d97706', marginBottom: 12 }}>
@@ -172,85 +181,135 @@ export default function AdminPage() {
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 700, fontSize: 14 }}>{u.username}</span>
                             {u.isAdmin && <span style={{ fontSize: 10, background: 'var(--accent)', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>ADMIN</span>}
+                            {!u.isAdmin && (
+                              <span style={{
+                                fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                                background: isSubActive(u) ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)',
+                                color: isSubActive(u) ? '#16a34a' : '#dc2626',
+                              }}>
+                                {u.subscriptionWaived ? '✓ WAIVED' : isSubActive(u) ? '✓ SUBSCRIBED' : '✗ NO SUB'}
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>Joined {new Date(u.createdAt).toLocaleDateString()}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                            Joined {new Date(u.createdAt).toLocaleDateString()}
+                          </div>
+                          {u.lastSeen && (
+                            <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 1 }}>
+                              🟢 Last seen: {new Date(u.lastSeen).toLocaleString()}
+                            </div>
+                          )}
+                          {!u.lastSeen && !u.isAdmin && (
+                            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>⚪ Never logged in</div>
+                          )}
+                          {!u.isAdmin && u.subscriptionExpiry && !u.subscriptionWaived && (
+                            <div style={{ fontSize: 11, color: isSubActive(u) ? '#16a34a' : '#dc2626', marginTop: 1 }}>
+                              {isSubActive(u) ? '📅 Expires: ' : '❌ Expired: '}
+                              {new Date(u.subscriptionExpiry).toLocaleDateString()}
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, marginLeft: 8, flexShrink: 0 }}>
-                          {/* Status badge */}
-                          <span style={{ fontSize: 11, fontWeight: 700, color: u.isAdmin ? 'var(--accent)' : statusColor(u.status), background: u.isAdmin ? 'var(--accent-dim)' : statusBg(u.status), padding: '3px 8px', borderRadius: 6, textTransform: 'uppercase' }}>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700,
+                            color: u.isAdmin ? 'var(--accent)' : statusColor(u.status),
+                            background: u.isAdmin ? 'var(--accent-dim)' : statusBg(u.status),
+                            padding: '3px 8px', borderRadius: 6, textTransform: 'uppercase'
+                          }}>
                             {u.isAdmin ? 'Admin' : u.status}
                           </span>
 
-                          {/* Action buttons */}
                           {!u.isAdmin && (
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                              {u.status === 'approved' && (
-                                <>
-                                  <button onClick={() => handleAction(u.id, 'pause')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: '#6366f1', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    ⏸ Pause
-                                  </button>
-                                  <button onClick={() => handleAction(u.id, 'reject')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: 'var(--red-dim)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    Revoke
-                                  </button>
-                                </>
-                              )}
-                              {u.status === 'paused' && (
-                                <>
-                                  <button onClick={() => handleAction(u.id, 'unpause')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    ▶ Unpause
-                                  </button>
-                                  <button onClick={() => handleAction(u.id, 'reject')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: 'var(--red-dim)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    Revoke
-                                  </button>
-                                </>
-                              )}
-                              {u.status === 'pending' && (
-                                <>
-                                  <button onClick={() => handleAction(u.id, 'approve')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    Approve
-                                  </button>
-                                  <button onClick={() => handleAction(u.id, 'reject')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: 'var(--red-dim)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    Reject
-                                  </button>
-                                </>
-                              )}
-                              {u.status === 'rejected' && (
-                                <div style={{ display: 'flex', gap: 4 }}>
-                                  <button onClick={() => handleAction(u.id, 'approve')}
-                                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                    Restore
-                                  </button>
-                                  {confirmDelete === u.id ? (
-                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                      <span style={{ fontSize: 11, color: 'var(--red)' }}>Sure?</span>
-                                      <button onClick={() => handleAction(u.id, 'delete')}
-                                        style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'var(--red)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                        Yes, Delete
-                                      </button>
-                                      <button onClick={() => setConfirmDelete(null)}
-                                        style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button onClick={() => handleAction(u.id, 'delete')}
-                                      style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'var(--red)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                                      🗑 Delete
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                              {/* Account actions */}
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                {u.status === 'approved' && (
+                                  <>
+                                    <button onClick={() => handleAction(u.id, 'pause')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: '#6366f1', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      ⏸ Pause
                                     </button>
-                                  )}
-                                </div>
-                              )}
+                                    <button onClick={() => handleAction(u.id, 'reject')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: 'var(--red-dim)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      Revoke
+                                    </button>
+                                  </>
+                                )}
+                                {u.status === 'paused' && (
+                                  <>
+                                    <button onClick={() => handleAction(u.id, 'unpause')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      ▶ Unpause
+                                    </button>
+                                    <button onClick={() => handleAction(u.id, 'reject')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: 'var(--red-dim)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      Revoke
+                                    </button>
+                                  </>
+                                )}
+                                {u.status === 'pending' && (
+                                  <>
+                                    <button onClick={() => handleAction(u.id, 'approve')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      Approve
+                                    </button>
+                                    <button onClick={() => handleAction(u.id, 'reject')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: 'var(--red-dim)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                                {u.status === 'rejected' && (
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button onClick={() => handleAction(u.id, 'approve')}
+                                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                      Restore
+                                    </button>
+                                    {confirmDelete === u.id ? (
+                                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                        <span style={{ fontSize: 11, color: 'var(--red)' }}>Sure?</span>
+                                        <button onClick={() => handleAction(u.id, 'delete')}
+                                          style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'var(--red)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                          Yes
+                                        </button>
+                                        <button onClick={() => setConfirmDelete(null)}
+                                          style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                          No
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button onClick={() => handleAction(u.id, 'delete')}
+                                        style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'var(--red)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                                        🗑 Delete
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Subscription actions */}
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                {!u.subscriptionWaived ? (
+                                  <button onClick={() => handleAction(u.id, 'waive_subscription')}
+                                    style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', background: 'rgba(22,163,74,0.08)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }}>
+                                    🎁 Waive Sub
+                                  </button>
+                                ) : (
+                                  <button onClick={() => handleAction(u.id, 'unwaive_subscription')}
+                                    style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.2)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }}>
+                                    Remove Waiver
+                                  </button>
+                                )}
+                                <button onClick={() => handleAction(u.id, 'grant_subscription')}
+                                  style={{ fontSize: 10, fontWeight: 700, color: '#6366f1', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }}>
+                                  +30 Days
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>

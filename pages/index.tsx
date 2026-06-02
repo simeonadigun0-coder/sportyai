@@ -30,7 +30,9 @@ export default function AuthPage() {
       if (data.pending) { setPending(true); return }
       if (!res.ok) throw new Error(data.error || 'Something went wrong')
       if (data.token) localStorage.setItem('token', data.token)
-      router.push('/dashboard')
+if (data.user?.subscriptionExpiry) localStorage.setItem('subscriptionExpiry', data.user.subscriptionExpiry)
+if (data.user?.subscriptionWaived) localStorage.setItem('subscriptionWaived', String(data.user.subscriptionWaived))
+router.push('/dashboard')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed')
     } finally {

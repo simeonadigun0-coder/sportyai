@@ -11,6 +11,8 @@ export interface User {
   createdAt: string
   status: 'pending' | 'approved' | 'rejected' | 'paused'
   isAdmin: boolean
+  subscriptionWaived?: boolean
+  subscriptionExpiry?: string | null
 }
 
 export async function findUserByEmail(email: string): Promise<User | undefined> {
@@ -69,16 +71,30 @@ export async function updateUserStatus(
   status: 'pending' | 'approved' | 'rejected' | 'paused'
 ): Promise<void> {
   let user = await findUserById(id)
-
   if (!user) {
     const emailKeys = await redis.keys('user:email:*')
     const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
     user = users.find(u => u?.id === id) as User | undefined
   }
-
   if (!user) return
-
   const updated = { ...user, status }
+  await redis.set(`user:id:${id}`, updated)
+  await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
+  await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
+}
+
+export async function updateUserSubscription(
+  id: string,
+  data: { subscriptionExpiry?: string | null; subscriptionWaived?: boolean }
+): Promise<void> {
+  let user = await findUserById(id)
+  if (!user) {
+    const emailKeys = await redis.keys('user:email:*')
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    user = users.find(u => u?.id === id) as User | undefined
+  }
+  if (!user) return
+  const updated = { ...user, ...data }
   await redis.set(`user:id:${id}`, updated)
   await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
   await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
@@ -86,15 +102,12 @@ export async function updateUserStatus(
 
 export async function deleteUser(id: string): Promise<void> {
   let user = await findUserById(id)
-
   if (!user) {
     const emailKeys = await redis.keys('user:email:*')
     const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
     user = users.find(u => u?.id === id) as User | undefined
   }
-
   if (!user) return
-
   await redis.del(`user:id:${id}`)
   await redis.del(`user:email:${user.email.toLowerCase()}`)
   await redis.del(`user:username:${user.username.toLowerCase()}`)
@@ -116,6 +129,8 @@ export async function createUser(
     createdAt: new Date().toISOString(),
     status: isAdmin ? 'approved' : 'pending',
     isAdmin,
+    subscriptionWaived: isAdmin,
+    subscriptionExpiry: null,
   }
 
   await redis.set(`user:email:${email.toLowerCase()}`, user)
@@ -126,6 +141,13 @@ export async function createUser(
 
 export function verifyPassword(user: User, password: string): boolean {
   return bcrypt.compareSync(password, user.passwordHash)
+}
+
+export function isSubscriptionActive(user: User): boolean {
+  if (user.isAdmin) return true
+  if (user.subscriptionWaived) return true
+  if (!user.subscriptionExpiry) return false
+  return new Date(user.subscriptionExpiry) > new Date()
 }
 
 export async function updateLastSeen(userId: string): Promise<void> {

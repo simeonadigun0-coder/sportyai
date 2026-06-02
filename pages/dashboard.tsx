@@ -61,21 +61,54 @@ export default function Dashboard() {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
 
+  const [subscriptionActive, setSubscriptionActive] = useState(false)
+  const [subscriptionExpiry, setSubscriptionExpiry] = useState<string | null>(null)
+  const [showPayment, setShowPayment] = useState(false)
+  const [paymentLoading, setPaymentLoading] = useState(false)
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) { router.push('/'); return }
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      setUsername(payload.username)
-      setIsAdmin(payload.email === 'simeonadigun0@gmail.com')
-    } catch { router.push('/') }
-  }, [router])
+  const token = localStorage.getItem('token')
+  if (!token) { router.push('/'); return }
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    setUsername(payload.username)
+    setIsAdmin(payload.email === 'simeonadigun0@gmail.com')
+    if (payload.email === 'simeonadigun0@gmail.com') {
+      setSubscriptionActive(true)
+    }
+  } catch { router.push('/') }
+
+  // Check subscription status
+  const subExpiry = localStorage.getItem('subscriptionExpiry')
+  const subWaived = localStorage.getItem('subscriptionWaived')
+  if (subWaived === 'true') {
+    setSubscriptionActive(true)
+  } else if (subExpiry) {
+    setSubscriptionExpiry(subExpiry)
+    setSubscriptionActive(new Date(subExpiry) > new Date())
+  }
+}, [router])
 
   const authHeaders = () => ({
     'Content-Type': 'application/json',
     Authorization: `Bearer ${localStorage.getItem('token')}`,
   })
-
+const handlePayment = async () => {
+  setPaymentLoading(true)
+  try {
+    const res = await fetch('/api/payment/initialize', {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    const data = await res.json()
+    if (data.authorizationUrl) {
+      window.location.href = data.authorizationUrl
+    }
+  } catch {
+    setError('Failed to initialize payment')
+  } finally {
+    setPaymentLoading(false)
+  }
+}
   const handleDecode = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true); setError('')
@@ -98,6 +131,12 @@ export default function Dashboard() {
   const handleAnalyse = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!slip) return
+
+    // Block if no subscription
+    if (!subscriptionActive) {
+      setShowPayment(true)
+      return
+    }
     if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
     const target = parseFloat(targetOdds)
     if (!target || target < 1) { setError('Enter valid target odds'); return }
@@ -579,7 +618,95 @@ export default function Dashboard() {
               </button>
             </div>
           )}
+          {/* Payment Modal */}
+{showPayment && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1000, padding: 20,
+  }}>
+    <div style={{
+      background: '#fff', borderRadius: 20, padding: 28,
+      maxWidth: 380, width: '100%',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    }}>
+      <div style={{ textAlign: 'center', marginBottom: 20 }}>
+        <div style={{ fontSize: 44, marginBottom: 12 }}>🔒</div>
+        <h3 style={{ fontSize: 20, fontWeight: 800, color: 'var(--navy)', marginBottom: 8 }}>
+          Subscription Required
+        </h3>
+        <p style={{ color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 }}>
+          {subscriptionExpiry && new Date(subscriptionExpiry) < new Date()
+            ? 'Your subscription has expired. Renew to continue analysing slips.'
+            : 'Subscribe to unlock AI analysis and slip cleaning.'}
+        </p>
+      </div>
+
+      <div style={{ background: 'var(--accent-dim)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 14, padding: '16px', marginBottom: 20, textAlign: 'center' }}>
+        <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>Monthly Subscription</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 32, fontWeight: 800, color: 'var(--accent)' }}>₦2,500</div>
+        <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>per month · Cancel anytime</div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+        {[
+          '✅ Unlimited slip analysis',
+          '✅ AI-powered pick replacement',
+          '✅ Real BSD + Sofascore data',
+          '✅ Fresh booking codes instantly',
+        ].map(f => (
+          <div key={f} style={{ fontSize: 13, color: 'var(--text2)' }}>{f}</div>
+        ))}
+      </div>
+
+      <button
+        onClick={handlePayment}
+        disabled={paymentLoading}
+        style={{
+          width: '100%', padding: '14px', background: 'var(--accent)',
+          color: '#fff', border: 'none', borderRadius: 12,
+          fontSize: 15, fontWeight: 700, cursor: 'pointer',
+          marginBottom: 10,
+        }}>
+        {paymentLoading
+          ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <span className="spinner" style={{ borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+              Redirecting...
+            </span>
+          : '💳 Subscribe with Paystack'}
+      </button>
+
+      <button onClick={() => setShowPayment(false)}
+        style={{ width: '100%', padding: '12px', background: 'none', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 12, fontSize: 13, cursor: 'pointer' }}>
+        Cancel
+      </button>
+
+      <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--text3)', marginTop: 12 }}>
+        Secure payment via Paystack · ₦2,500/month
+      </p>
+    </div>
+  </div>
+)}
         </main>
+
+        {/* Footer */}
+        <div style={{
+          textAlign: 'center', padding: '16px',
+          borderTop: '1px solid var(--border)',
+          background: '#fff',
+        }}>
+          <span style={{ fontSize: 13, color: 'var(--text3)' }}>
+            Encounter a challenge?{' '}
+            <a
+              href="https://wa.me/2349036592571"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#25D366', fontWeight: 700, textDecoration: 'none' }}
+            >
+              💬 Contact Support on WhatsApp
+            </a>
+          </span>
+        </div>
       </div>
     </>
   )

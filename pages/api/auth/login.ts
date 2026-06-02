@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { findUserByEmail, verifyPassword } from '@/lib/users'
+import { findUserByEmail, verifyPassword, updateLastSeen, isSubscriptionActive } from '@/lib/users'
 import { signToken } from '@/lib/auth'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -24,10 +24,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (user.status === 'paused')
     return res.status(403).json({ error: 'Your account has been paused. Contact admin for help.' })
 
+  const subscriptionActive = isSubscriptionActive(user)
+
   const token = signToken({ userId: user.id, username: user.username, email: user.email })
   res.setHeader('Set-Cookie', `token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`)
+
+  updateLastSeen(user.id)
+
   return res.status(200).json({
     token,
-    user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin },
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      isAdmin: user.isAdmin,
+      subscriptionActive,
+      subscriptionExpiry: user.subscriptionExpiry,
+      subscriptionWaived: user.subscriptionWaived,
+    },
   })
 }
