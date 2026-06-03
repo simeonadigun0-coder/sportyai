@@ -58,7 +58,6 @@ function teamsMatch(a: string, b: string, c: string, d: string): boolean {
 async function getBSDEvent(homeTeam: string, awayTeam: string): Promise<Record<string, unknown> | null> {
   const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
   const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
-
   for (const term of [homeTeam, homeTeam.split(' ')[0], awayTeam, awayTeam.split(' ')[0]]) {
     try {
       const res = await fetch(
@@ -87,15 +86,12 @@ function parseBSD(event: Record<string, unknown>, homeTeam: string, awayTeam: st
   const h2h = event.head_to_head as Record<string, unknown> | null
   const unavail = event.unavailable_players as Record<string, unknown> | null
   const pred = event.prediction as Record<string, unknown> | null
-
   const fmt = (f: Record<string, unknown> | null, name: string) =>
     f ? `${name}:[${f.form_string || '?'}] W${f.wins || 0}D${f.draws || 0}L${f.losses || 0} scored:${f.goals_scored_last_n || 0} conceded:${f.goals_conceded_last_n || 0}`
       : `${name}:no form data`
-
   const fmtH2H = (h: Record<string, unknown> | null) =>
     h ? `H2H(${h.total_matches || 0}): ${homeTeam} wins:${h.home_wins || 0} draws:${h.draws || 0} ${awayTeam} wins:${h.away_wins || 0}`
       : 'H2H:no data'
-
   const fmtInj = (u: Record<string, unknown> | null) => {
     if (!u) return ''
     const fmt2 = (arr: unknown[]) => arr.slice(0, 3).map((p: unknown) => {
@@ -107,7 +103,6 @@ function parseBSD(event: Record<string, unknown>, homeTeam: string, awayTeam: st
     if (!h.length && !a.length) return ''
     return `Injuries-H:[${h.length ? fmt2(h) : 'none'}] A:[${a.length ? fmt2(a) : 'none'}]`
   }
-
   const parts = [fmt(hf, homeTeam), fmt(af, awayTeam), fmtH2H(h2h)]
   const inj = fmtInj(unavail)
   if (inj) parts.push(inj)
@@ -138,7 +133,6 @@ async function getSofaForm(teamId: number, teamName: string): Promise<string> {
     const data = await res.json()
     const events = ((data.events || []) as unknown[]).slice(-5)
     if (!events.length) return `${teamName}:no recent matches`
-
     let w = 0, d = 0, l = 0
     const results = events.map((e: unknown) => {
       const ev = e as Record<string, unknown>
@@ -178,17 +172,13 @@ async function gatherGameData(game: SportyBetGame): Promise<{
   const isFootball = !game.sport ||
     game.sport.toLowerCase().includes('football') ||
     game.sport.toLowerCase().includes('soccer')
-
   if (!isFootball) return { game, context: '', dataSource: 'AI_WEB_SEARCH' }
-
   let context = ''
   let dataSource = 'FALLBACK'
-
   const [bsdEvent, sofaData] = await Promise.all([
     getBSDEvent(game.homeTeam, game.awayTeam),
     getSofaData(game.homeTeam, game.awayTeam),
   ])
-
   if (bsdEvent) {
     context += `BSD:${parseBSD(bsdEvent, game.homeTeam, game.awayTeam)}`
     dataSource = 'BSD'
@@ -198,7 +188,6 @@ async function gatherGameData(game: SportyBetGame): Promise<{
     dataSource = bsdEvent ? 'BSD+SOFASCORE' : 'SOFASCORE'
   }
   if (!context) dataSource = 'AI_WEB_SEARCH'
-
   return { game, context, dataSource }
 }
 
@@ -210,9 +199,8 @@ interface AnalysisResult {
   keep: boolean
   reason: string
   formSummary: string
-  suggestReplacement?: boolean
-  replacePick?: string | null
-  replaceMarket?: string | null
+  replacePick: string | null
+  replaceMarket: string | null
 }
 
 function extractJSON(raw: string): AnalysisResult[] {
@@ -220,164 +208,17 @@ function extractJSON(raw: string): AnalysisResult[] {
     const direct = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
     return JSON.parse(direct)
   } catch { /* continue */ }
-
   const start = raw.indexOf('[')
   const end = raw.lastIndexOf(']')
   if (start === -1 || end === -1) throw new Error('No JSON array found')
-
   let slice = raw.substring(start, end + 1)
   slice = slice
     .replace(/,\s*([}\]])/g, '$1')
-    .replace(/([{,]\s*)(\w+):/g, '$1"$2":')
-    .replace(/:\s*'([^']*)'/g, ': "$1"')
-    .replace(/\n/g, ' ')
-    .replace(/\r/g, '')
-    .replace(/\t/g, ' ')
-
+    .replace(/\n/g, ' ').replace(/\r/g, '').replace(/\t/g, ' ')
   return JSON.parse(slice)
 }
 
-async function batchAnalyse(
-  gameData: Array<{ game: SportyBetGame; context: string; dataSource: string }>,
-  targetOdds: number,
-  allowSwitching: boolean
-): Promise<Map<string, AnalysisResult>> {
-
-  const gamesList = gameData.map((gd, i) => {
-    const hasData = Boolean(gd.context)
-    const dataNote = hasData ? gd.context : 'NO_STATS - keep unless pick is clearly wrong'
-    const oddsNote = gd.game.odds >= 4.0 ? 'VERY_HIGH_ODDS' : gd.game.odds >= 2.5 ? 'HIGH_ODDS' : gd.game.odds >= 1.8 ? 'MEDIUM_ODDS' : 'LOW_ODDS'
-    return `G${i + 1}|id:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:"${gd.game.pick}"(${gd.game.market})|odds:${gd.game.odds}|${oddsNote}|${dataNote}`
-  }).join('\n')
-
-  const replacementNote = allowSwitching
-  ? `REPLACEMENT MODE: When a pick is risky and a safer market exists, provide the replacement directly.
-Use these known safer alternatives:
-- Over 2.5 → replace with "Over 1.5" in "Over/Under" market  
-- Over 3.5 → replace with "Over 2.5"
-- Over 4.5 → replace with "Over 2.5" or "Over 1.5"
-- Away Win (1X2) → replace with "Draw/Away" in "Double Chance"
-- Home Win (1X2) with uncertain form → replace with "Home/Draw" in "Double Chance"
-- Draw (1X2) → replace with "Home/Draw" or "Draw/Away" in "Double Chance"
-- GG Yes (risky) → replace with "No" in "GG/NG"
-- 1UP Home → replace with "Home" in "1X2" or "Home/Draw" in "Double Chance"
-- 2UP any → replace with equivalent in "1X2" or "Double Chance"
-Add to your JSON: "replacePick": "new pick name or null", "replaceMarket": "market name or null"`
-  : `REMOVAL MODE: suggestReplacement=false for all.`
-
-  const prompt = `You are a professional football punter. Analyse each match and provide honest assessments.
-
-RULES:
-- Missing stats = keep, give confidence 55-65, suggestReplacement based on market type
-- Only set keep=false if data CLEARLY shows pick will lose
-- Target odds: ${targetOdds}
-- ${replacementNote}
-
-MARKET REPLACEMENT GUIDE (for suggestReplacement):
-- Over 2.5, Over 3.5, Over 4.5 = suggest replacement (step down line)
-- Away Win (high odds) = suggest replacement (X2 double chance)  
-- Home Win (uncertain form) = suggest replacement (1X double chance)
-- Draw (risky) = suggest replacement (double chance)
-- GG Yes (defensive teams) = suggest replacement (GG No or Under)
-- 1UP, 2UP markets = suggest replacement (standard 1X2)
-- Under 1.5, Under 0.5 = suggest replacement (Under 2.5)
-
-GAMES:
-${gamesList}
-
-RESPOND WITH ONLY A JSON ARRAY. NO OTHER TEXT:
-[{"eventId":"EXACT_ID","confidenceScore":NUMBER,"riskScore":NUMBER,"riskLevel":"LOW or MEDIUM or HIGH","keep":true or false,"reason":"brief reason","formSummary":"key stat","suggestReplacement":true or false,"replacePick":"safer pick name or null","replaceMarket":"safer market name or null"}]`
-
-  const map = new Map<string, AnalysisResult>()
-
-  try {
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a JSON API. Output ONLY valid JSON arrays. Never output text, markdown, or explanation. Always start with [ and end with ].'
-        },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.1,
-      max_tokens: 4000,
-    })
-
-    const raw = completion.choices[0]?.message?.content || '[]'
-    const results = extractJSON(raw)
-
-    for (const r of results) {
-      const gd = gameData.find(g => g.game.eventId === r.eventId)
-      let keep = r.keep === true
-      if (gd && !gd.context && !keep && r.confidenceScore > 30) keep = true
-
-      map.set(r.eventId, {
-        ...r,
-        keep,
-        suggestReplacement: r.suggestReplacement === true,
-        riskLevel: (['LOW', 'MEDIUM', 'HIGH'].includes(r.riskLevel) ? r.riskLevel : 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',
-      })
-    }
-  } catch (err) {
-    console.error('AI batch analysis failed:', err)
-    for (const gd of gameData) {
-      const hasData = Boolean(gd.context)
-      // In replacement mode, suggest replacement for common risky markets
-      const market = gd.game.market.toLowerCase()
-      const pick = gd.game.pick.toLowerCase()
-      const suggestReplacement = allowSwitching && (
-        (market.includes('over/under') && (pick.includes('over 2') || pick.includes('over 3') || pick.includes('over 4'))) ||
-        (market === '1x2' && (pick === 'away' || pick === 'home')) ||
-        (market.includes('gg') && pick === 'yes') ||
-        market.includes('1up') || market.includes('2up')
-      )
-      map.set(gd.game.eventId, {
-        eventId: gd.game.eventId,
-        confidenceScore: hasData ? 65 : 55,
-        riskScore: hasData ? 4 : 5,
-        riskLevel: 'MEDIUM',
-        reason: hasData ? 'Data found — keeping based on available statistics' : 'No stats — kept as missing data is not a removal reason',
-        formSummary: hasData ? gd.dataSource : 'Small league',
-        keep: true,
-        suggestReplacement,
-      })
-    }
-  }
-
-  return map
-}
-
-function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAnalysis[] {
-  if (games.length === 0) return games
-
-  const currentTotal = games.reduce((acc, g) =>
-    acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
-
-  if (currentTotal <= targetOdds * 1.2) return games
-
-  const sorted = [...games].sort((a, b) => a.confidenceScore - b.confidenceScore)
-  let bestCombo = games
-  let bestDiff = Math.abs(currentTotal - targetOdds)
-
-  for (let removeCount = 1; removeCount < sorted.length - 1; removeCount++) {
-    const candidate = sorted.slice(removeCount)
-    const candidateOdds = candidate.reduce((acc, g) =>
-      acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
-    const diff = Math.abs(candidateOdds - targetOdds)
-
-    if (diff < bestDiff) {
-      bestDiff = diff
-      bestCombo = candidate
-    }
-    if (candidateOdds < targetOdds * 0.5) break
-  }
-
-  if (bestCombo.length < 2) bestCombo = sorted.slice(sorted.length - 2)
-  return bestCombo
-}
-// Known SportyBet market IDs and outcome IDs
-// These are consistent across all matches on SportyBet Nigeria
+// Known SportyBet market and outcome IDs
 function getKnownMarketReplacement(
   marketName: string,
   pickName: string,
@@ -386,42 +227,42 @@ function getKnownMarketReplacement(
   const market = marketName.toLowerCase().trim()
   const pick = pickName.toLowerCase().trim()
 
-  // Over/Under — marketId 2, outcomes vary by line
+  // Over/Under -- marketId 2
   if (market.includes('over/under') || market === 'over/under') {
     const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
     if (!isNaN(num)) {
-      // Over outcomes: Over 0.5=id:12, Over 1=id:2, Over 1.5=id:3, Over 2=id:4, Over 2.5=id:5
-      // Under outcomes: Under 0.5=id:22, Under 1=id:11, Under 1.5=id:13, Under 2=id:14, Under 2.5=id:15
-      const overMap: Record<number, string> = { 0.5: '12', 1: '2', 1.5: '3', 2: '4', 2.5: '5', 3: '6', 3.5: '7', 4: '8', 4.5: '9', 5: '10' }
-      const underMap: Record<number, string> = { 0.5: '22', 1: '11', 1.5: '13', 2: '14', 2.5: '15', 3: '16', 3.5: '17', 4: '18', 4.5: '19', 5: '20' }
-
-      if (pick.startsWith('over') && overMap[num]) {
-        const estimatedOdds = Math.max(1.04, originalOdds * 0.6) // safer = lower odds estimate
-        return { marketId: '2', outcomeId: overMap[num], estimatedOdds: parseFloat(estimatedOdds.toFixed(2)) }
+      const overMap: Record<string, string> = {
+        '0.5': '12', '1': '2', '1.5': '3', '2': '4',
+        '2.5': '5', '3': '6', '3.5': '7', '4': '8', '4.5': '9', '5': '10'
       }
-      if (pick.startsWith('under') && underMap[num]) {
-        const estimatedOdds = Math.max(1.04, originalOdds * 0.65)
-        return { marketId: '2', outcomeId: underMap[num], estimatedOdds: parseFloat(estimatedOdds.toFixed(2)) }
+      const underMap: Record<string, string> = {
+        '0.5': '22', '1': '11', '1.5': '13', '2': '14',
+        '2.5': '15', '3': '16', '3.5': '17', '4': '18', '4.5': '19', '5': '20'
+      }
+      const key = String(num)
+      if (pick.startsWith('over') && overMap[key]) {
+        return { marketId: '2', outcomeId: overMap[key], estimatedOdds: parseFloat((originalOdds * 0.55).toFixed(2)) }
+      }
+      if (pick.startsWith('under') && underMap[key]) {
+        return { marketId: '2', outcomeId: underMap[key], estimatedOdds: parseFloat((originalOdds * 0.6).toFixed(2)) }
       }
     }
   }
 
-  // Double Chance — marketId 3
-  // Home/Draw = outcomeId 1, Draw/Away = outcomeId 3, Home/Away = outcomeId 2
+  // Double Chance -- marketId 3
   if (market.includes('double chance')) {
-    if (pick.includes('home/draw') || pick.includes('1x') || pick === 'home or draw') {
-      return { marketId: '3', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.5).toFixed(2)) }
+    if (pick.includes('home') && pick.includes('draw')) {
+      return { marketId: '3', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.45).toFixed(2)) }
     }
-    if (pick.includes('draw/away') || pick.includes('x2') || pick === 'draw or away') {
-      return { marketId: '3', outcomeId: '3', estimatedOdds: parseFloat((originalOdds * 0.55).toFixed(2)) }
+    if (pick.includes('draw') && pick.includes('away')) {
+      return { marketId: '3', outcomeId: '3', estimatedOdds: parseFloat((originalOdds * 0.5).toFixed(2)) }
     }
-    if (pick.includes('home/away') || pick.includes('12') || pick === 'home or away') {
-      return { marketId: '3', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.45).toFixed(2)) }
+    if (pick.includes('home') && pick.includes('away')) {
+      return { marketId: '3', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.4).toFixed(2)) }
     }
   }
 
-  // GG/NG — marketId 5
-  // Yes = outcomeId 1, No = outcomeId 2
+  // GG/NG -- marketId 5
   if (market.includes('gg') || market.includes('both teams')) {
     if (pick === 'yes' || pick === 'gg') {
       return { marketId: '5', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.7).toFixed(2)) }
@@ -431,8 +272,7 @@ function getKnownMarketReplacement(
     }
   }
 
-  // 1X2 — marketId 1
-  // Home = outcomeId 1, Draw = outcomeId 2, Away = outcomeId 3
+  // 1X2 -- marketId 1
   if (market === '1x2') {
     if (pick === 'home' || pick === '1') {
       return { marketId: '1', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.75).toFixed(2)) }
@@ -448,8 +288,169 @@ function getKnownMarketReplacement(
   return null
 }
 
+// Automatic replacement rules - no AI needed
+function autoReplace(game: SportyBetGame): { replacePick: string; replaceMarket: string } | null {
+  const market = game.market.toLowerCase().trim()
+  const pick = game.pick.toLowerCase().trim()
+  const odds = game.odds
+
+  // Over/Under - step down the line
+  if (market.includes('over/under') && !market.includes('corner') && !market.includes('early')) {
+    const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
+    if (pick.startsWith('over') && !isNaN(num)) {
+      if (num >= 4.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
+      if (num >= 3.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
+      if (num >= 2.5) return { replacePick: 'Over 1.5', replaceMarket: 'Over/Under' }
+      if (num >= 1.5 && odds > 1.5) return { replacePick: 'Over 0.5', replaceMarket: 'Over/Under' }
+    }
+    if (pick.startsWith('under') && !isNaN(num)) {
+      if (num <= 1.5) return { replacePick: 'Under 2.5', replaceMarket: 'Over/Under' }
+      if (num <= 0.5) return { replacePick: 'Under 1.5', replaceMarket: 'Over/Under' }
+    }
+  }
+
+  // 1X2 - replace with Double Chance
+  if (market === '1x2') {
+    if ((pick === 'home' || pick === '1') && odds > 1.8) {
+      return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
+    }
+    if ((pick === 'away' || pick === '2') && odds > 1.6) {
+      return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
+    }
+    if ((pick === 'draw' || pick === 'x') && odds > 3.0) {
+      return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
+    }
+  }
+
+  // GG Yes - replace with GG No if odds high
+  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes' && odds > 1.7) {
+    return { replacePick: 'No', replaceMarket: 'GG/NG' }
+  }
+
+  // 1UP/2UP - step down to standard 1X2
+  if (market.includes('2up')) {
+    if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
+    if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
+  }
+  if (market.includes('1up') && odds > 1.5) {
+    if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
+    if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
+  }
+
+  return null
+}
+
+async function batchAnalyse(
+  gameData: Array<{ game: SportyBetGame; context: string; dataSource: string }>,
+  targetOdds: number,
+  allowSwitching: boolean
+): Promise<Map<string, AnalysisResult>> {
+
+  const gamesList = gameData.map((gd, i) => {
+    const hasData = Boolean(gd.context)
+    const dataNote = hasData ? gd.context : 'NO_STATS'
+    const oddsNote = gd.game.odds >= 4.0 ? 'VERY_HIGH_ODDS' : gd.game.odds >= 2.5 ? 'HIGH_ODDS' : gd.game.odds >= 1.8 ? 'MEDIUM_ODDS' : 'LOW_ODDS'
+    return `G${i + 1}|id:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:${gd.game.pick}(${gd.game.market})|odds:${gd.game.odds}|${oddsNote}|${dataNote}`
+  }).join('\n')
+
+  const modeInstructions = allowSwitching
+    ? 'REPLACE MODE: Set replacePick and replaceMarket for any risky pick. Examples: Over2.5 becomes Over1.5, Away Win becomes Draw/Away, Home Win becomes Home/Draw, GG-Yes becomes No. Set to null only if pick is already the safest option.'
+    : 'REMOVE MODE: Set replacePick to null and replaceMarket to null for all games.'
+
+  const prompt = `You are a professional football betting analyst.
+
+${modeInstructions}
+
+TARGET ODDS: ${targetOdds}
+MISSING STATS = keep the game (never remove for missing data)
+
+GAMES:
+${gamesList}
+
+Return ONLY a JSON array, one object per game, same order:
+[{"eventId":"EXACT_ID","confidenceScore":NUMBER_0_TO_100,"riskScore":NUMBER_1_TO_10,"riskLevel":"LOW","keep":true,"reason":"short reason","formSummary":"key stat","replacePick":"Over 1.5 or Home/Draw or null","replaceMarket":"Over/Under or Double Chance or null"}]`
+
+  const map = new Map<string, AnalysisResult>()
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a JSON API. Output ONLY a valid JSON array. Start with [ end with ]. No text before or after.'
+        },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+    })
+
+    const raw = completion.choices[0]?.message?.content || '[]'
+    const results = extractJSON(raw)
+
+    for (const r of results) {
+      const gd = gameData.find(g => g.game.eventId === r.eventId)
+      let keep = r.keep === true
+      if (gd && !gd.context && !keep) keep = true // never remove for missing data
+
+      map.set(r.eventId, {
+        ...r,
+        keep,
+        replacePick: r.replacePick || null,
+        replaceMarket: r.replaceMarket || null,
+        riskLevel: (['LOW', 'MEDIUM', 'HIGH'].includes(r.riskLevel) ? r.riskLevel : 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',
+      })
+    }
+  } catch (err) {
+    console.error('AI analysis failed:', err)
+    // Fallback with auto-replacement
+    for (const gd of gameData) {
+      const auto = allowSwitching ? autoReplace(gd.game) : null
+      map.set(gd.game.eventId, {
+        eventId: gd.game.eventId,
+        confidenceScore: Boolean(gd.context) ? 65 : 55,
+        riskScore: 5,
+        riskLevel: 'MEDIUM',
+        reason: Boolean(gd.context) ? 'Kept based on available data' : 'No stats — kept by default',
+        formSummary: gd.dataSource,
+        keep: true,
+        replacePick: auto?.replacePick || null,
+        replaceMarket: auto?.replaceMarket || null,
+      })
+    }
+  }
+
+  return map
+}
+
+function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAnalysis[] {
+  if (games.length === 0) return games
+  const currentTotal = games.reduce((acc, g) =>
+    acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
+  if (currentTotal <= targetOdds * 1.2) return games
+  const sorted = [...games].sort((a, b) => a.confidenceScore - b.confidenceScore)
+  let bestCombo = games
+  let bestDiff = Math.abs(currentTotal - targetOdds)
+  for (let removeCount = 1; removeCount < sorted.length - 1; removeCount++) {
+    const candidate = sorted.slice(removeCount)
+    const candidateOdds = candidate.reduce((acc, g) =>
+      acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
+    const diff = Math.abs(candidateOdds - targetOdds)
+    if (diff < bestDiff) { bestDiff = diff; bestCombo = candidate }
+    if (candidateOdds < targetOdds * 0.5) break
+  }
+  if (bestCombo.length < 2) bestCombo = sorted.slice(sorted.length - 2)
+  return bestCombo
+}
+
 export async function analyseSlip(
-games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwitching: boolean = false, clientMarkets: Record<string, unknown> = {}): Promise<SlipAnalysis> {
+  games: SportyBetGame[],
+  targetOdds: number,
+  originalTotalOdds: number,
+  allowSwitching: boolean = false,
+  clientMarkets: Record<string, unknown> = {}
+): Promise<SlipAnalysis> {
 
   const footballGames = games.filter(g =>
     !g.sport || g.sport.toLowerCase().includes('football') || g.sport.toLowerCase().includes('soccer')
@@ -458,99 +459,25 @@ games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwit
     g.sport && !g.sport.toLowerCase().includes('football') && !g.sport.toLowerCase().includes('soccer')
   )
 
-  // Use client-side fetched markets (bypasses Vercel IP block)
-  // Fall back to server-side fetch only if client didn't provide markets
-  const buildEventMarketsMap = async () => {
-    if (!allowSwitching) return new Map()
-    
-    const map = new Map()
-    
-    for (const game of games) {
-      // Use client-provided markets first
-      if (clientMarkets[game.eventId]) {
-        const cm = clientMarkets[game.eventId] as Record<string, unknown>
-        const rawMarkets = (cm.markets as unknown[]) || []
-        
-        const markets = rawMarkets.map((m: unknown) => {
-          const market = m as Record<string, unknown>
-          const rawOutcomes = (market.outcomes as unknown[]) || []
-          const outcomes = rawOutcomes
-            .map((o: unknown) => {
-              const outcome = o as Record<string, unknown>
-              return {
-                id: String(outcome.id || ''),
-                odds: parseFloat(String(outcome.odds || 1)),
-                probability: parseFloat(String(outcome.probability || 0)),
-                desc: String(outcome.desc || ''),
-                isActive: outcome.isActive === 1 || outcome.isActive === true,
-              }
-            })
-            .filter((o: { isActive: boolean; odds: number }) => o.isActive && o.odds > 1.0)
-
-          return {
-            id: String(market.id || ''),
-            desc: String(market.desc || market.name || ''),
-            name: String(market.name || market.desc || ''),
-            group: String(market.group || 'Main'),
-            outcomes,
-          }
-        }).filter((m: { outcomes: unknown[] }) => m.outcomes.length > 0)
-
-        if (markets.length > 0) {
-          map.set(game.eventId, {
-            eventId: game.eventId,
-            homeTeam: game.homeTeam,
-            awayTeam: game.awayTeam,
-            markets,
-          })
-        }
-      } else {
-        // Fallback to server-side fetch
-        const serverMarkets = await fetchEventMarkets(game)
-        if (serverMarkets) map.set(game.eventId, serverMarkets)
-      }
-    }
-    
-    return map
-  }
-
-  const [footballData, eventMarketsMap] = await Promise.all([
-    Promise.all(footballGames.map(g => gatherGameData(g))),
-    buildEventMarketsMap(),
-  ])
-
+  const footballData = await Promise.all(footballGames.map(g => gatherGameData(g)))
   const footballResults = await batchAnalyse(footballData, targetOdds, allowSwitching)
 
+  // Non-football
   const otherResults = new Map<string, AnalysisResult>()
   if (otherGames.length > 0) {
-    try {
-      const gamesList = otherGames.map((g, i) =>
-        `G${i + 1}|id:${g.eventId}|${g.homeTeam} vs ${g.awayTeam}|${g.sport}|${g.league}|pick:"${g.pick}"(${g.market})|odds:${g.odds}`
-      ).join('\n')
-
-      const completion = await groq.chat.completions.create({
-        model: 'compound-beta',
-        messages: [
-          { role: 'system', content: 'You are a JSON API. Output ONLY valid JSON arrays.' },
-          { role: 'user', content: `Research these matches. Missing data=keep. Target:${targetOdds}\n${gamesList}\n[{"eventId":"...","confidenceScore":0-100,"riskScore":1-10,"riskLevel":"LOW or MEDIUM or HIGH","keep":true or false,"reason":"...","formSummary":"...","suggestReplacement":true or false}]` }
-        ],
-        temperature: 0.1,
-        max_tokens: 2000,
+    for (const g of otherGames) {
+      const auto = allowSwitching ? autoReplace(g) : null
+      otherResults.set(g.eventId, {
+        eventId: g.eventId,
+        confidenceScore: 58,
+        riskScore: 5,
+        riskLevel: 'MEDIUM',
+        reason: 'Non-football sport',
+        formSummary: 'Web search',
+        keep: true,
+        replacePick: auto?.replacePick || null,
+        replaceMarket: auto?.replaceMarket || null,
       })
-
-      const raw = completion.choices[0]?.message?.content || '[]'
-      const results = extractJSON(raw)
-      for (const r of results) {
-        otherResults.set(r.eventId, { ...r, keep: r.keep === true })
-      }
-    } catch {
-      for (const g of otherGames) {
-        otherResults.set(g.eventId, {
-          eventId: g.eventId, confidenceScore: 58, riskScore: 5,
-          riskLevel: 'MEDIUM', reason: 'Unable to research — kept by default',
-          formSummary: 'No data', keep: true, suggestReplacement: false,
-        })
-      }
     }
   }
 
@@ -579,29 +506,40 @@ games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwit
       riskScore: 5,
       riskLevel: 'MEDIUM',
       reason: 'Kept by default',
-      formSummary: 'No stats',
+      formSummary: 'No data',
       keep: true,
       dataSource: 'FALLBACK',
     }
 
-    // Apply AI-suggested replacement directly using known market IDs
-    if (allowSwitching && result?.replacePick && result?.replaceMarket) {
-      const replacement = getKnownMarketReplacement(
-        result.replaceMarket,
-        result.replacePick,
-        game.odds
-      )
-      if (replacement) {
-        return {
-          ...baseResult,
-          keep: true,
-          replaced: true,
-          replacedMarketId: replacement.marketId,
-          replacedOutcomeId: replacement.outcomeId,
-          replacedMarketDesc: result.replaceMarket,
-          replacedPick: result.replacePick,
-          replacedOdds: replacement.estimatedOdds,
-          replacementReason: result.reason,
+    // Apply replacement
+    if (allowSwitching) {
+      // First try AI suggestion
+      const aiReplacePick = result?.replacePick
+      const aiReplaceMarket = result?.replaceMarket
+
+      // Fall back to auto-replacement rules
+      const auto = (!aiReplacePick || !aiReplaceMarket) ? autoReplace(game) : null
+      const finalReplacePick = aiReplacePick || auto?.replacePick || null
+      const finalReplaceMarket = aiReplaceMarket || auto?.replaceMarket || null
+
+      if (finalReplacePick && finalReplaceMarket) {
+        const replacement = getKnownMarketReplacement(
+          finalReplaceMarket,
+          finalReplacePick,
+          game.odds
+        )
+        if (replacement && replacement.estimatedOdds < game.odds) {
+          return {
+            ...baseResult,
+            keep: true,
+            replaced: true,
+            replacedMarketId: replacement.marketId,
+            replacedOutcomeId: replacement.outcomeId,
+            replacedMarketDesc: finalReplaceMarket,
+            replacedPick: finalReplacePick,
+            replacedOdds: Math.max(1.04, replacement.estimatedOdds),
+            replacementReason: result?.reason || `Safer option: ${finalReplacePick} in ${finalReplaceMarket}`,
+          }
         }
       }
     }
@@ -611,7 +549,6 @@ games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwit
 
   const aiKept = analysisResults.filter(g => g.keep)
   const aiRemoved = analysisResults.filter(g => !g.keep)
-
   const keptGames = findBestCombination(aiKept, targetOdds)
 
   if (keptGames.length < 2) {
@@ -651,14 +588,14 @@ games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwit
     const sc = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages: [
-        { role: 'system', content: 'Write short direct betting summaries for Nigerian punters.' },
+        { role: 'system', content: 'Write short direct betting summaries.' },
         {
           role: 'user',
-          content: `2 sentences. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with safer options.` : ''} Removed:${removedGames.map(g => `${g.homeTeam}vs${g.awayTeam}`).join(',') || 'none'}.`
+          content: `2 sentences for a Nigerian punter. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with safer options.` : ''} Removed:${removedGames.map(g => `${g.homeTeam}vs${g.awayTeam}`).join(',') || 'none'}.`
         }
       ],
       temperature: 0.4,
-      max_tokens: 120,
+      max_tokens: 100,
     })
     summary = sc.choices[0]?.message?.content || summary
   } catch { /* use default */ }
