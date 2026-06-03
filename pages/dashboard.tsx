@@ -183,7 +183,7 @@ const handlePayment = async () => {
     } finally { setLoading(false) }
   }
 
-  const handleAnalyse = async (e: React.FormEvent) => {
+ const handleAnalyse = async (e: React.FormEvent) => {
   e.preventDefault()
   if (!slip) return
 
@@ -198,12 +198,6 @@ const handlePayment = async () => {
   setLoading(true); setError(''); setStep('analysing')
 
   try {
-    // Fetch markets from browser (bypasses Vercel IP block)
-    let clientMarkets: Record<string, unknown> = {}
-    if (allowSwitching) {
-      clientMarkets = await fetchMarketsClientSide(slip.games)
-    }
-
     const res = await fetch('/api/analyse', {
       method: 'POST', headers: authHeaders(),
       body: JSON.stringify({
@@ -211,7 +205,7 @@ const handlePayment = async () => {
         targetOdds: target,
         originalTotalOdds: slip.totalOdds,
         allowSwitching,
-        clientMarkets: allowSwitching ? clientMarkets : {},
+        clientMarkets: {},
       }),
     })
     const data = await res.json()
@@ -232,7 +226,6 @@ const handlePayment = async () => {
     setStep('decoded')
   } finally { setLoading(false) }
 }
-
   const reset = () => {
     setStep('input'); setCode(''); setTargetOdds('')
     setSlip(null); setAnalysis(null); setNewCode('')

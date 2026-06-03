@@ -211,6 +211,8 @@ interface AnalysisResult {
   reason: string
   formSummary: string
   suggestReplacement?: boolean
+  replacePick?: string | null
+  replaceMarket?: string | null
 }
 
 function extractJSON(raw: string): AnalysisResult[] {
@@ -249,8 +251,19 @@ async function batchAnalyse(
   }).join('\n')
 
   const replacementNote = allowSwitching
-    ? `REPLACEMENT MODE: For suggestReplacement - set true if the pick market has a safer equivalent available (e.g. Over 2.5 can become Over 1.5, Home Win can become Home/Draw Double Chance, Away Win can become Draw/Away). Set false only if the pick is already the safest in its category (e.g. Over 0.5, Double Chance already, Draw No Bet).`
-    : `REMOVAL MODE: suggestReplacement=false for all.`
+  ? `REPLACEMENT MODE: When a pick is risky and a safer market exists, provide the replacement directly.
+Use these known safer alternatives:
+- Over 2.5 → replace with "Over 1.5" in "Over/Under" market  
+- Over 3.5 → replace with "Over 2.5"
+- Over 4.5 → replace with "Over 2.5" or "Over 1.5"
+- Away Win (1X2) → replace with "Draw/Away" in "Double Chance"
+- Home Win (1X2) with uncertain form → replace with "Home/Draw" in "Double Chance"
+- Draw (1X2) → replace with "Home/Draw" or "Draw/Away" in "Double Chance"
+- GG Yes (risky) → replace with "No" in "GG/NG"
+- 1UP Home → replace with "Home" in "1X2" or "Home/Draw" in "Double Chance"
+- 2UP any → replace with equivalent in "1X2" or "Double Chance"
+Add to your JSON: "replacePick": "new pick name or null", "replaceMarket": "market name or null"`
+  : `REMOVAL MODE: suggestReplacement=false for all.`
 
   const prompt = `You are a professional football punter. Analyse each match and provide honest assessments.
 
@@ -273,7 +286,7 @@ GAMES:
 ${gamesList}
 
 RESPOND WITH ONLY A JSON ARRAY. NO OTHER TEXT:
-[{"eventId":"EXACT_ID","confidenceScore":NUMBER,"riskScore":NUMBER,"riskLevel":"LOW or MEDIUM or HIGH","keep":true or false,"reason":"brief reason","formSummary":"key stat","suggestReplacement":true or false}]`
+[{"eventId":"EXACT_ID","confidenceScore":NUMBER,"riskScore":NUMBER,"riskLevel":"LOW or MEDIUM or HIGH","keep":true or false,"reason":"brief reason","formSummary":"key stat","suggestReplacement":true or false,"replacePick":"safer pick name or null","replaceMarket":"safer market name or null"}]`
 
   const map = new Map<string, AnalysisResult>()
 
@@ -362,6 +375,77 @@ function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAna
 
   if (bestCombo.length < 2) bestCombo = sorted.slice(sorted.length - 2)
   return bestCombo
+}
+// Known SportyBet market IDs and outcome IDs
+// These are consistent across all matches on SportyBet Nigeria
+function getKnownMarketReplacement(
+  marketName: string,
+  pickName: string,
+  originalOdds: number
+): { marketId: string; outcomeId: string; estimatedOdds: number } | null {
+  const market = marketName.toLowerCase().trim()
+  const pick = pickName.toLowerCase().trim()
+
+  // Over/Under — marketId 2, outcomes vary by line
+  if (market.includes('over/under') || market === 'over/under') {
+    const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
+    if (!isNaN(num)) {
+      // Over outcomes: Over 0.5=id:12, Over 1=id:2, Over 1.5=id:3, Over 2=id:4, Over 2.5=id:5
+      // Under outcomes: Under 0.5=id:22, Under 1=id:11, Under 1.5=id:13, Under 2=id:14, Under 2.5=id:15
+      const overMap: Record<number, string> = { 0.5: '12', 1: '2', 1.5: '3', 2: '4', 2.5: '5', 3: '6', 3.5: '7', 4: '8', 4.5: '9', 5: '10' }
+      const underMap: Record<number, string> = { 0.5: '22', 1: '11', 1.5: '13', 2: '14', 2.5: '15', 3: '16', 3.5: '17', 4: '18', 4.5: '19', 5: '20' }
+
+      if (pick.startsWith('over') && overMap[num]) {
+        const estimatedOdds = Math.max(1.04, originalOdds * 0.6) // safer = lower odds estimate
+        return { marketId: '2', outcomeId: overMap[num], estimatedOdds: parseFloat(estimatedOdds.toFixed(2)) }
+      }
+      if (pick.startsWith('under') && underMap[num]) {
+        const estimatedOdds = Math.max(1.04, originalOdds * 0.65)
+        return { marketId: '2', outcomeId: underMap[num], estimatedOdds: parseFloat(estimatedOdds.toFixed(2)) }
+      }
+    }
+  }
+
+  // Double Chance — marketId 3
+  // Home/Draw = outcomeId 1, Draw/Away = outcomeId 3, Home/Away = outcomeId 2
+  if (market.includes('double chance')) {
+    if (pick.includes('home/draw') || pick.includes('1x') || pick === 'home or draw') {
+      return { marketId: '3', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.5).toFixed(2)) }
+    }
+    if (pick.includes('draw/away') || pick.includes('x2') || pick === 'draw or away') {
+      return { marketId: '3', outcomeId: '3', estimatedOdds: parseFloat((originalOdds * 0.55).toFixed(2)) }
+    }
+    if (pick.includes('home/away') || pick.includes('12') || pick === 'home or away') {
+      return { marketId: '3', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.45).toFixed(2)) }
+    }
+  }
+
+  // GG/NG — marketId 5
+  // Yes = outcomeId 1, No = outcomeId 2
+  if (market.includes('gg') || market.includes('both teams')) {
+    if (pick === 'yes' || pick === 'gg') {
+      return { marketId: '5', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.7).toFixed(2)) }
+    }
+    if (pick === 'no' || pick === 'ng') {
+      return { marketId: '5', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.65).toFixed(2)) }
+    }
+  }
+
+  // 1X2 — marketId 1
+  // Home = outcomeId 1, Draw = outcomeId 2, Away = outcomeId 3
+  if (market === '1x2') {
+    if (pick === 'home' || pick === '1') {
+      return { marketId: '1', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.75).toFixed(2)) }
+    }
+    if (pick === 'draw' || pick === 'x') {
+      return { marketId: '1', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.8).toFixed(2)) }
+    }
+    if (pick === 'away' || pick === '2') {
+      return { marketId: '1', outcomeId: '3', estimatedOdds: parseFloat((originalOdds * 0.75).toFixed(2)) }
+    }
+  }
+
+  return null
 }
 
 export async function analyseSlip(
@@ -500,36 +584,24 @@ games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwit
       dataSource: 'FALLBACK',
     }
 
-    // Try replacement for ALL games in switching mode
-    // when AI suggests it OR when it's a known risky market type
-    const shouldTryReplacement = allowSwitching && (
-      result?.suggestReplacement === true ||
-      // Always try for these market types
-      game.market.toLowerCase().includes('over/under') ||
-      game.market.toLowerCase() === '1x2' ||
-      game.market.toLowerCase().includes('gg') ||
-      game.market.toLowerCase().includes('1up') ||
-      game.market.toLowerCase().includes('2up')
-    )
-
-    if (shouldTryReplacement) {
-      const eventMarkets = eventMarketsMap.get(game.eventId)
-      if (eventMarkets) {
-        const replacement = findSaferReplacement(
-          eventMarkets, game.market, game.pick, game.odds
-        )
-        if (replacement) {
-          return {
-            ...baseResult,
-            keep: true,
-            replaced: true,
-            replacedMarketId: replacement.marketId,
-            replacedOutcomeId: replacement.outcomeId,
-            replacedMarketDesc: replacement.marketDesc,
-            replacedPick: replacement.pickDesc,
-            replacedOdds: replacement.odds,
-            replacementReason: replacement.reason,
-          }
+    // Apply AI-suggested replacement directly using known market IDs
+    if (allowSwitching && result?.replacePick && result?.replaceMarket) {
+      const replacement = getKnownMarketReplacement(
+        result.replaceMarket,
+        result.replacePick,
+        game.odds
+      )
+      if (replacement) {
+        return {
+          ...baseResult,
+          keep: true,
+          replaced: true,
+          replacedMarketId: replacement.marketId,
+          replacedOutcomeId: replacement.outcomeId,
+          replacedMarketDesc: result.replaceMarket,
+          replacedPick: result.replacePick,
+          replacedOdds: replacement.estimatedOdds,
+          replacementReason: result.reason,
         }
       }
     }
