@@ -103,6 +103,61 @@ const handlePayment = async () => {
     if (data.authorizationUrl) {
       window.location.href = data.authorizationUrl
     }
+    const fetchMarketsClientSide = async (games: Game[]): Promise<Record<string, unknown>> => {
+  const marketsMap: Record<string, unknown> = {}
+  
+  await Promise.all(games.map(async (game) => {
+    try {
+      const commonMarketIds = ['1','2','3','4','5','18','19','20','21','29','45']
+      const payload = commonMarketIds.map(marketId => ({
+        eventId: game.eventId,
+        marketId,
+        outcomeId: '1',
+        specifier: null,
+      }))
+
+      const res = await fetch('https://www.sportybet.com/api/ng/factsCenter/Outcomes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': '*/*',
+          'Origin': 'https://www.sportybet.com',
+          'Referer': 'https://www.sportybet.com/ng/',
+          'Clientid': 'web',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) return
+      const data = await res.json()
+      if (!data || data.bizCode !== 10000) return
+
+      // Collect all unique markets
+      const allMarkets: unknown[] = []
+      const seenIds = new Set<string>()
+
+      for (const eventData of (data.data || [])) {
+        for (const m of (eventData.markets || [])) {
+          if (!seenIds.has(m.id)) {
+            seenIds.add(m.id)
+            allMarkets.push(m)
+          }
+        }
+      }
+
+      if (allMarkets.length > 0) {
+        marketsMap[game.eventId] = {
+          eventId: game.eventId,
+          homeTeam: game.homeTeam,
+          awayTeam: game.awayTeam,
+          markets: allMarkets,
+        }
+      }
+    } catch { /* skip */ }
+  }))
+
+  return marketsMap
+}
   } catch {
     setError('Failed to initialize payment')
   } finally {
@@ -129,46 +184,54 @@ const handlePayment = async () => {
   }
 
   const handleAnalyse = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!slip) return
+  e.preventDefault()
+  if (!slip) return
 
-    // Block if no subscription
-    if (!subscriptionActive) {
-      setShowPayment(true)
-      return
-    }
-    if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
-    const target = parseFloat(targetOdds)
-    if (!target || target < 1) { setError('Enter valid target odds'); return }
-    setLoading(true); setError(''); setStep('analysing')
-    try {
-      const res = await fetch('/api/analyse', {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({
-          games: slip.games,
-          targetOdds: target,
-          originalTotalOdds: slip.totalOdds,
-          allowSwitching,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setAnalysis(data)
-
-      if (data.keptGames?.length > 0) {
-        const rebookRes = await fetch('/api/rebook', {
-          method: 'POST', headers: authHeaders(),
-          body: JSON.stringify({ games: data.keptGames }),
-        })
-        const rebookData = await rebookRes.json()
-        if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
-      }
-      setStep('result')
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Analysis failed')
-      setStep('decoded')
-    } finally { setLoading(false) }
+  if (!subscriptionActive) {
+    setShowPayment(true)
+    return
   }
+
+  if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
+  const target = parseFloat(targetOdds)
+  if (!target || target < 1) { setError('Enter valid target odds'); return }
+  setLoading(true); setError(''); setStep('analysing')
+
+  try {
+    // Fetch markets from browser (bypasses Vercel IP block)
+    let clientMarkets: Record<string, unknown> = {}
+    if (allowSwitching) {
+      clientMarkets = await fetchMarketsClientSide(slip.games)
+    }
+
+    const res = await fetch('/api/analyse', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({
+        games: slip.games,
+        targetOdds: target,
+        originalTotalOdds: slip.totalOdds,
+        allowSwitching,
+        clientMarkets: allowSwitching ? clientMarkets : {},
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error)
+    setAnalysis(data)
+
+    if (data.keptGames?.length > 0) {
+      const rebookRes = await fetch('/api/rebook', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ games: data.keptGames }),
+      })
+      const rebookData = await rebookRes.json()
+      if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
+    }
+    setStep('result')
+  } catch (err: unknown) {
+    setError(err instanceof Error ? err.message : 'Analysis failed')
+    setStep('decoded')
+  } finally { setLoading(false) }
+}
 
   const reset = () => {
     setStep('input'); setCode(''); setTargetOdds('')
@@ -710,4 +773,8 @@ const handlePayment = async () => {
       </div>
     </>
   )
+}
+
+function fetchMarketsClientSide(games: Game[]): Record<string, unknown> | PromiseLike<Record<string, unknown>> {
+  throw new Error('Function not implemented.')
 }

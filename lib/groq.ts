@@ -365,11 +365,7 @@ function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAna
 }
 
 export async function analyseSlip(
-  games: SportyBetGame[],
-  targetOdds: number,
-  originalTotalOdds: number,
-  allowSwitching: boolean = false
-): Promise<SlipAnalysis> {
+games: SportyBetGame[], targetOdds: number, originalTotalOdds: number, allowSwitching: boolean = false, clientMarkets: Record<string, unknown> = {}): Promise<SlipAnalysis> {
 
   const footballGames = games.filter(g =>
     !g.sport || g.sport.toLowerCase().includes('football') || g.sport.toLowerCase().includes('soccer')
@@ -378,15 +374,65 @@ export async function analyseSlip(
     g.sport && !g.sport.toLowerCase().includes('football') && !g.sport.toLowerCase().includes('soccer')
   )
 
-  // Gather data + fetch ALL event markets if switching mode
+  // Use client-side fetched markets (bypasses Vercel IP block)
+  // Fall back to server-side fetch only if client didn't provide markets
+  const buildEventMarketsMap = async () => {
+    if (!allowSwitching) return new Map()
+    
+    const map = new Map()
+    
+    for (const game of games) {
+      // Use client-provided markets first
+      if (clientMarkets[game.eventId]) {
+        const cm = clientMarkets[game.eventId] as Record<string, unknown>
+        const rawMarkets = (cm.markets as unknown[]) || []
+        
+        const markets = rawMarkets.map((m: unknown) => {
+          const market = m as Record<string, unknown>
+          const rawOutcomes = (market.outcomes as unknown[]) || []
+          const outcomes = rawOutcomes
+            .map((o: unknown) => {
+              const outcome = o as Record<string, unknown>
+              return {
+                id: String(outcome.id || ''),
+                odds: parseFloat(String(outcome.odds || 1)),
+                probability: parseFloat(String(outcome.probability || 0)),
+                desc: String(outcome.desc || ''),
+                isActive: outcome.isActive === 1 || outcome.isActive === true,
+              }
+            })
+            .filter((o: { isActive: boolean; odds: number }) => o.isActive && o.odds > 1.0)
+
+          return {
+            id: String(market.id || ''),
+            desc: String(market.desc || market.name || ''),
+            name: String(market.name || market.desc || ''),
+            group: String(market.group || 'Main'),
+            outcomes,
+          }
+        }).filter((m: { outcomes: unknown[] }) => m.outcomes.length > 0)
+
+        if (markets.length > 0) {
+          map.set(game.eventId, {
+            eventId: game.eventId,
+            homeTeam: game.homeTeam,
+            awayTeam: game.awayTeam,
+            markets,
+          })
+        }
+      } else {
+        // Fallback to server-side fetch
+        const serverMarkets = await fetchEventMarkets(game)
+        if (serverMarkets) map.set(game.eventId, serverMarkets)
+      }
+    }
+    
+    return map
+  }
+
   const [footballData, eventMarketsMap] = await Promise.all([
     Promise.all(footballGames.map(g => gatherGameData(g))),
-    allowSwitching
-      ? Promise.all(games.map(async g => {
-          const markets = await fetchEventMarkets(g)
-          return [g.eventId, markets] as [string, typeof markets]
-        })).then(pairs => new Map(pairs))
-      : Promise.resolve(new Map()),
+    buildEventMarketsMap(),
   ])
 
   const footballResults = await batchAnalyse(footballData, targetOdds, allowSwitching)
