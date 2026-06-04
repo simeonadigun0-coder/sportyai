@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk'
-import { SportyBetGame, fetchEventMarkets, findSaferReplacement } from './sportybet'
+import { SportyBetGame } from './sportybet'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 const BSD_TOKEN = process.env.BSD_API_KEY || ''
@@ -26,10 +26,11 @@ export interface GameAnalysis extends SportyBetGame {
   keep: boolean
   dataSource: string
   replaced?: boolean
-  replacedMarketId?: string
-  replacedOutcomeId?: string
-  replacedMarketDesc?: string
+  originalPick?: string
+  originalMarket?: string
+  originalOdds?: number
   replacedPick?: string
+  replacedMarketDesc?: string
   replacedOdds?: number
   replacementReason?: string
 }
@@ -218,121 +219,103 @@ function extractJSON(raw: string): AnalysisResult[] {
   return JSON.parse(slice)
 }
 
-// Known SportyBet market and outcome IDs
-function getKnownMarketReplacement(
-  marketName: string,
-  pickName: string,
-  originalOdds: number
-): { marketId: string; outcomeId: string; estimatedOdds: number } | null {
-  const market = marketName.toLowerCase().trim()
-  const pick = pickName.toLowerCase().trim()
+// Estimate safer odds based on market type
+function estimateSaferOdds(
+  originalOdds: number,
+  originalPick: string,
+  newPick: string,
+  newMarket: string
+): number {
+  const orig = originalPick.toLowerCase()
+  const np = newPick.toLowerCase()
+  const nm = newMarket.toLowerCase()
 
-  // Over/Under -- marketId 2
-  if (market.includes('over/under') || market === 'over/under') {
-    const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
-    if (!isNaN(num)) {
-      const overMap: Record<string, string> = {
-        '0.5': '12', '1': '2', '1.5': '3', '2': '4',
-        '2.5': '5', '3': '6', '3.5': '7', '4': '8', '4.5': '9', '5': '10'
-      }
-      const underMap: Record<string, string> = {
-        '0.5': '22', '1': '11', '1.5': '13', '2': '14',
-        '2.5': '15', '3': '16', '3.5': '17', '4': '18', '4.5': '19', '5': '20'
-      }
-      const key = String(num)
-      if (pick.startsWith('over') && overMap[key]) {
-        return { marketId: '2', outcomeId: overMap[key], estimatedOdds: parseFloat((originalOdds * 0.55).toFixed(2)) }
-      }
-      if (pick.startsWith('under') && underMap[key]) {
-        return { marketId: '2', outcomeId: underMap[key], estimatedOdds: parseFloat((originalOdds * 0.6).toFixed(2)) }
-      }
+  // Over/Under step down
+  if (nm.includes('over/under') || nm.includes('over') || nm.includes('under')) {
+    const origNum = parseFloat(orig.replace(/[^0-9.]/g, ''))
+    const newNum = parseFloat(np.replace(/[^0-9.]/g, ''))
+    if (!isNaN(origNum) && !isNaN(newNum)) {
+      const diff = origNum - newNum
+      // Each 0.5 step down roughly halves the distance to 1.0
+      const factor = Math.max(0.3, 1 - (diff * 0.25))
+      return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * factor).toFixed(2)))
     }
   }
 
-  // Double Chance -- marketId 3
-  if (market.includes('double chance')) {
-    if (pick.includes('home') && pick.includes('draw')) {
-      return { marketId: '3', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.45).toFixed(2)) }
-    }
-    if (pick.includes('draw') && pick.includes('away')) {
-      return { marketId: '3', outcomeId: '3', estimatedOdds: parseFloat((originalOdds * 0.5).toFixed(2)) }
-    }
-    if (pick.includes('home') && pick.includes('away')) {
-      return { marketId: '3', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.4).toFixed(2)) }
-    }
+  // Double Chance from 1X2
+  if (nm.includes('double chance')) {
+    return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.4).toFixed(2)))
   }
 
-  // GG/NG -- marketId 5
-  if (market.includes('gg') || market.includes('both teams')) {
-    if (pick === 'yes' || pick === 'gg') {
-      return { marketId: '5', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.7).toFixed(2)) }
-    }
-    if (pick === 'no' || pick === 'ng') {
-      return { marketId: '5', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.65).toFixed(2)) }
-    }
+  // Draw No Bet
+  if (nm.includes('draw no bet') || nm.includes('dnb')) {
+    return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.6).toFixed(2)))
   }
 
-  // 1X2 -- marketId 1
-  if (market === '1x2') {
-    if (pick === 'home' || pick === '1') {
-      return { marketId: '1', outcomeId: '1', estimatedOdds: parseFloat((originalOdds * 0.75).toFixed(2)) }
-    }
-    if (pick === 'draw' || pick === 'x') {
-      return { marketId: '1', outcomeId: '2', estimatedOdds: parseFloat((originalOdds * 0.8).toFixed(2)) }
-    }
-    if (pick === 'away' || pick === '2') {
-      return { marketId: '1', outcomeId: '3', estimatedOdds: parseFloat((originalOdds * 0.75).toFixed(2)) }
-    }
+  // GG No from GG Yes
+  if (nm.includes('gg') || nm.includes('both teams')) {
+    return Math.max(1.05, parseFloat((originalOdds * 0.65).toFixed(2)))
   }
 
-  return null
+  // Default: 50% reduction toward 1.0
+  return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.5).toFixed(2)))
 }
 
-// Automatic replacement rules - no AI needed
-function autoReplace(game: SportyBetGame): { replacePick: string; replaceMarket: string } | null {
+// Auto replacement rules based on market/pick/odds
+function autoReplace(game: SportyBetGame, targetOdds: number, currentSlipOdds: number): {
+  replacePick: string
+  replaceMarket: string
+} | null {
   const market = game.market.toLowerCase().trim()
   const pick = game.pick.toLowerCase().trim()
   const odds = game.odds
 
+  // Only replace if it helps reach target OR if pick is genuinely risky
+  const slipTooHigh = currentSlipOdds > targetOdds * 1.3
+  const isRisky = odds >= 2.5
+
+  if (!slipTooHigh && !isRisky) return null
+
   // Over/Under - step down the line
-  if (market.includes('over/under') && !market.includes('corner') && !market.includes('early')) {
+  if (market.includes('over/under') && !market.includes('corner')) {
     const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
     if (pick.startsWith('over') && !isNaN(num)) {
       if (num >= 4.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
       if (num >= 3.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
-      if (num >= 2.5) return { replacePick: 'Over 1.5', replaceMarket: 'Over/Under' }
+      if (num >= 2.5 && odds > 1.4) return { replacePick: 'Over 1.5', replaceMarket: 'Over/Under' }
       if (num >= 1.5 && odds > 1.5) return { replacePick: 'Over 0.5', replaceMarket: 'Over/Under' }
     }
     if (pick.startsWith('under') && !isNaN(num)) {
       if (num <= 1.5) return { replacePick: 'Under 2.5', replaceMarket: 'Over/Under' }
-      if (num <= 0.5) return { replacePick: 'Under 1.5', replaceMarket: 'Over/Under' }
     }
   }
 
   // 1X2 - replace with Double Chance
   if (market === '1x2') {
-    if ((pick === 'home' || pick === '1') && odds > 1.8) {
+    if ((pick === 'home' || pick === '1') && odds >= 1.8) {
       return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     }
-    if ((pick === 'away' || pick === '2') && odds > 1.6) {
+    if ((pick === 'away' || pick === '2') && odds >= 1.6) {
       return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
     }
-    if ((pick === 'draw' || pick === 'x') && odds > 3.0) {
+    if ((pick === 'draw' || pick === 'x') && odds >= 3.0) {
       return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     }
   }
 
-  // GG Yes - replace with GG No if odds high
-  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes' && odds > 1.7) {
+  // GG Yes - risky
+  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes' && odds >= 1.7) {
     return { replacePick: 'No', replaceMarket: 'GG/NG' }
   }
 
-  // 1UP/2UP - step down to standard 1X2
+  // 2UP - step down
   if (market.includes('2up')) {
     if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
   }
-  if (market.includes('1up') && odds > 1.5) {
+
+  // 1UP - step down if risky odds
+  if (market.includes('1up') && odds >= 1.8) {
     if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
   }
@@ -346,6 +329,8 @@ async function batchAnalyse(
   allowSwitching: boolean
 ): Promise<Map<string, AnalysisResult>> {
 
+  const currentSlipOdds = gameData.reduce((acc, gd) => acc * gd.game.odds, 1)
+
   const gamesList = gameData.map((gd, i) => {
     const hasData = Boolean(gd.context)
     const dataNote = hasData ? gd.context : 'NO_STATS'
@@ -354,21 +339,23 @@ async function batchAnalyse(
   }).join('\n')
 
   const modeInstructions = allowSwitching
-    ? 'REPLACE MODE: Set replacePick and replaceMarket for any risky pick. Examples: Over2.5 becomes Over1.5, Away Win becomes Draw/Away, Home Win becomes Home/Draw, GG-Yes becomes No. Set to null only if pick is already the safest option.'
-    : 'REMOVE MODE: Set replacePick to null and replaceMarket to null for all games.'
+    ? `REPLACE MODE: Current slip odds are ${currentSlipOdds.toFixed(2)}, target is ${targetOdds}. For risky picks suggest a safer replacement. Examples: Over2.5 becomes Over1.5, Away Win becomes Draw/Away Double Chance, Home Win becomes Home/Draw Double Chance. Set replacePick and replaceMarket fields. Use null if pick is already safe.`
+    : 'REMOVE MODE: Set replacePick and replaceMarket to null for all.'
 
   const prompt = `You are a professional football betting analyst.
 
 ${modeInstructions}
 
+MISSING STATS = keep the game, do not remove.
 TARGET ODDS: ${targetOdds}
-MISSING STATS = keep the game (never remove for missing data)
 
 GAMES:
 ${gamesList}
 
-Return ONLY a JSON array, one object per game, same order:
-[{"eventId":"EXACT_ID","confidenceScore":NUMBER_0_TO_100,"riskScore":NUMBER_1_TO_10,"riskLevel":"LOW","keep":true,"reason":"short reason","formSummary":"key stat","replacePick":"Over 1.5 or Home/Draw or null","replaceMarket":"Over/Under or Double Chance or null"}]`
+Return ONLY a JSON array, one object per game in same order:
+[{"eventId":"EXACT_ID","confidenceScore":55,"riskScore":5,"riskLevel":"LOW","keep":true,"reason":"brief reason","formSummary":"key stat","replacePick":"Over 1.5","replaceMarket":"Over/Under"}]
+
+replacePick and replaceMarket must be actual pick and market names, or null.`
 
   const map = new Map<string, AnalysisResult>()
 
@@ -378,7 +365,7 @@ Return ONLY a JSON array, one object per game, same order:
       messages: [
         {
           role: 'system',
-          content: 'You are a JSON API. Output ONLY a valid JSON array. Start with [ end with ]. No text before or after.'
+          content: 'You are a JSON API. Output ONLY a valid JSON array. Start with [ end with ]. No other text.'
         },
         { role: 'user', content: prompt }
       ],
@@ -392,27 +379,38 @@ Return ONLY a JSON array, one object per game, same order:
     for (const r of results) {
       const gd = gameData.find(g => g.game.eventId === r.eventId)
       let keep = r.keep === true
-      if (gd && !gd.context && !keep) keep = true // never remove for missing data
+      if (gd && !gd.context && !keep) keep = true
+
+      // If in replace mode and AI didn't suggest replacement, use auto rules
+      let replacePick = r.replacePick || null
+      let replaceMarket = r.replaceMarket || null
+
+      if (allowSwitching && (!replacePick || !replaceMarket) && gd) {
+        const auto = autoReplace(gd.game, targetOdds, currentSlipOdds)
+        if (auto) {
+          replacePick = auto.replacePick
+          replaceMarket = auto.replaceMarket
+        }
+      }
 
       map.set(r.eventId, {
         ...r,
         keep,
-        replacePick: r.replacePick || null,
-        replaceMarket: r.replaceMarket || null,
+        replacePick,
+        replaceMarket,
         riskLevel: (['LOW', 'MEDIUM', 'HIGH'].includes(r.riskLevel) ? r.riskLevel : 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',
       })
     }
   } catch (err) {
     console.error('AI analysis failed:', err)
-    // Fallback with auto-replacement
     for (const gd of gameData) {
-      const auto = allowSwitching ? autoReplace(gd.game) : null
+      const auto = allowSwitching ? autoReplace(gd.game, targetOdds, currentSlipOdds) : null
       map.set(gd.game.eventId, {
         eventId: gd.game.eventId,
         confidenceScore: Boolean(gd.context) ? 65 : 55,
         riskScore: 5,
         riskLevel: 'MEDIUM',
-        reason: Boolean(gd.context) ? 'Kept based on available data' : 'No stats — kept by default',
+        reason: Boolean(gd.context) ? 'Kept based on data' : 'No stats — kept by default',
         formSummary: gd.dataSource,
         keep: true,
         replacePick: auto?.replacePick || null,
@@ -459,26 +457,24 @@ export async function analyseSlip(
     g.sport && !g.sport.toLowerCase().includes('football') && !g.sport.toLowerCase().includes('soccer')
   )
 
+  const currentSlipOdds = games.reduce((acc, g) => acc * g.odds, 1)
   const footballData = await Promise.all(footballGames.map(g => gatherGameData(g)))
   const footballResults = await batchAnalyse(footballData, targetOdds, allowSwitching)
 
-  // Non-football
   const otherResults = new Map<string, AnalysisResult>()
-  if (otherGames.length > 0) {
-    for (const g of otherGames) {
-      const auto = allowSwitching ? autoReplace(g) : null
-      otherResults.set(g.eventId, {
-        eventId: g.eventId,
-        confidenceScore: 58,
-        riskScore: 5,
-        riskLevel: 'MEDIUM',
-        reason: 'Non-football sport',
-        formSummary: 'Web search',
-        keep: true,
-        replacePick: auto?.replacePick || null,
-        replaceMarket: auto?.replaceMarket || null,
-      })
-    }
+  for (const g of otherGames) {
+    const auto = allowSwitching ? autoReplace(g, targetOdds, currentSlipOdds) : null
+    otherResults.set(g.eventId, {
+      eventId: g.eventId,
+      confidenceScore: 58,
+      riskScore: 5,
+      riskLevel: 'MEDIUM',
+      reason: 'Non-football sport',
+      formSummary: 'Web search',
+      keep: true,
+      replacePick: auto?.replacePick || null,
+      replaceMarket: auto?.replaceMarket || null,
+    })
   }
 
   const allResults = new Map<string, AnalysisResult>()
@@ -511,36 +507,29 @@ export async function analyseSlip(
       dataSource: 'FALLBACK',
     }
 
-    // Apply replacement
-    if (allowSwitching) {
-      // First try AI suggestion
-      const aiReplacePick = result?.replacePick
-      const aiReplaceMarket = result?.replaceMarket
+    // Apply replacement in switching mode
+    if (allowSwitching && result?.replacePick && result?.replaceMarket) {
+      const newPick = result.replacePick
+      const newMarket = result.replaceMarket
+      const estimatedOdds = estimateSaferOdds(game.odds, game.pick, newPick, newMarket)
 
-      // Fall back to auto-replacement rules
-      const auto = (!aiReplacePick || !aiReplaceMarket) ? autoReplace(game) : null
-      const finalReplacePick = aiReplacePick || auto?.replacePick || null
-      const finalReplaceMarket = aiReplaceMarket || auto?.replaceMarket || null
-
-      if (finalReplacePick && finalReplaceMarket) {
-        const replacement = getKnownMarketReplacement(
-          finalReplaceMarket,
-          finalReplacePick,
-          game.odds
-        )
-        if (replacement && replacement.estimatedOdds < game.odds) {
-          return {
-            ...baseResult,
-            keep: true,
-            replaced: true,
-            replacedMarketId: replacement.marketId,
-            replacedOutcomeId: replacement.outcomeId,
-            replacedMarketDesc: finalReplaceMarket,
-            replacedPick: finalReplacePick,
-            replacedOdds: Math.max(1.04, replacement.estimatedOdds),
-            replacementReason: result?.reason || `Safer option: ${finalReplacePick} in ${finalReplaceMarket}`,
-          }
-        }
+      return {
+        ...baseResult,
+        keep: true,
+        replaced: true,
+        // Preserve original info for display
+        originalPick: game.pick,
+        originalMarket: game.market,
+        originalOdds: game.odds,
+        // New pick info for display
+        replacedPick: newPick,
+        replacedMarketDesc: newMarket,
+        replacedOdds: estimatedOdds,
+        replacementReason: result.reason || `Safer option: ${newPick} in ${newMarket}`,
+        // IMPORTANT: Keep original marketId/outcomeId for booking
+        // The booking uses original selection — replacement is advisory
+        marketId: game.marketId,
+        outcomeId: game.outcomeId,
       }
     }
 
@@ -563,24 +552,11 @@ export async function analyseSlip(
   const finalGames = analysisResults.map(g => ({ ...g, keep: keptIds.has(g.eventId) }))
   const removedGames = finalGames.filter(g => !g.keep)
 
+  // Use estimated odds for replaced games in total calculation
   const newOdds = keptGames.reduce((acc, g) => {
     const odds = g.replaced ? (g.replacedOdds || g.odds) : g.odds
     return acc * odds
   }, 1)
-
-  const finalKeptGames = keptGames.map(g => {
-    if (g.replaced && g.replacedMarketId && g.replacedOutcomeId) {
-      return {
-        ...g,
-        marketId: g.replacedMarketId,
-        outcomeId: g.replacedOutcomeId,
-        market: g.replacedMarketDesc || g.market,
-        pick: g.replacedPick || g.pick,
-        odds: g.replacedOdds || g.odds,
-      }
-    }
-    return g
-  })
 
   let summary = `Analysed ${games.length} games. Kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target: ${targetOdds}). Removed ${removedGames.length} picks.`
   try {
@@ -588,10 +564,10 @@ export async function analyseSlip(
     const sc = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages: [
-        { role: 'system', content: 'Write short direct betting summaries.' },
+        { role: 'system', content: 'Write short direct betting summaries for Nigerian punters.' },
         {
           role: 'user',
-          content: `2 sentences for a Nigerian punter. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with safer options.` : ''} Removed:${removedGames.map(g => `${g.homeTeam}vs${g.awayTeam}`).join(',') || 'none'}.`
+          content: `2 sentences. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with safer options.` : ''} Removed:${removedGames.map(g => `${g.homeTeam}vs${g.awayTeam}`).join(',') || 'none'}.`
         }
       ],
       temperature: 0.4,
@@ -603,7 +579,7 @@ export async function analyseSlip(
   return {
     games: finalGames,
     removedGames,
-    keptGames: finalKeptGames,
+    keptGames,
     originalOdds: parseFloat(originalTotalOdds.toFixed(2)),
     newOdds: parseFloat(newOdds.toFixed(2)),
     targetOdds,

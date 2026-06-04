@@ -26,10 +26,11 @@ interface GameAnalysis extends Game {
   keep: boolean
   dataSource: string
   replaced?: boolean
-  replacedMarketId?: string
-  replacedOutcomeId?: string
-  replacedMarketDesc?: string
+  originalPick?: string
+  originalMarket?: string
+  originalOdds?: number
   replacedPick?: string
+  replacedMarketDesc?: string
   replacedOdds?: number
   replacementReason?: string
 }
@@ -589,23 +590,25 @@ const handlePayment = async () => {
                             PICK CHANGED TO SAFER OPTION
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <div style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 10px', fontSize: 12, color: '#dc2626', textDecoration: 'line-through' }}>
-                              {g.pick} ({g.market}) @ {g.odds}
-                            </div>
-                            <span style={{ fontSize: 14, color: 'var(--text3)' }}>→</span>
-                            <div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: 12, color: '#3b82f6', fontWeight: 700 }}>
-                              {g.replacedPick} ({g.replacedMarketDesc}) @ {g.replacedOdds}
-                            </div>
+                            {/* Original pick - struck through */}
+<div style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6, padding: '4px 10px', fontSize: 12, color: '#dc2626', textDecoration: 'line-through' }}>
+  {g.originalPick || g.pick} ({g.originalMarket || g.market}) @ {g.originalOdds || g.odds}
+</div>
+<span style={{ fontSize: 14, color: 'var(--text3)' }}>→</span>
+{/* New safer pick */}
+<div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 6, padding: '4px 10px', fontSize: 12, color: '#3b82f6', fontWeight: 700 }}>
+  {g.replacedPick} ({g.replacedMarketDesc}) @ ~{g.replacedOdds}
+</div>
                           </div>
                           <div style={{ fontSize: 11, color: '#6366f1', marginTop: 6, fontStyle: 'italic' }}>
                             💡 {g.replacementReason}
                           </div>
                         </div>
                       ) : (
-                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
-                          {g.league} · Pick: <strong style={{ color: 'var(--text2)' }}>{g.pick}</strong> ({g.market})
-                        </div>
-                      )}
+  <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+    {g.league} · Pick: <strong style={{ color: g.replaced ? '#3b82f6' : 'var(--text2)' }}>{g.replaced ? g.replacedPick : g.pick}</strong> ({g.replaced ? g.replacedMarketDesc : g.market})
+  </div>
+)}
 
                       {/* Confidence bar */}
                       <div style={{ marginBottom: 8 }}>
@@ -754,7 +757,7 @@ const handlePayment = async () => {
           <span style={{ fontSize: 13, color: 'var(--text3)' }}>
             Encounter a challenge?{' '}
             <a
-              href="https://wa.me/2349036592571"
+              href="https://wa.me/2349113349715"
               target="_blank"
               rel="noopener noreferrer"
               style={{ color: '#25D366', fontWeight: 700, textDecoration: 'none' }}
