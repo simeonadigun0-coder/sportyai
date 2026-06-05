@@ -710,8 +710,8 @@ const handlePayment = async () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
         {[
           '✅ Unlimited slip analysis',
-          '✅ AI-powered pick replacement',
-          '✅ Real BSD + Sofascore data',
+          '✅ Expert pick replacement',
+          '✅ Live form, injuries & stats',
           '✅ Fresh booking codes instantly',
         ].map(f => (
           <div key={f} style={{ fontSize: 13, color: 'var(--text2)' }}>{f}</div>
