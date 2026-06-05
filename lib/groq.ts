@@ -270,52 +270,40 @@ function autoReplace(game: SportyBetGame, targetOdds: number, currentSlipOdds: n
   const pick = game.pick.toLowerCase().trim()
   const odds = game.odds
 
-  // Only replace if it helps reach target OR if pick is genuinely risky
-  const slipTooHigh = currentSlipOdds > targetOdds * 1.3
-  const isRisky = odds >= 2.5
-
-  if (!slipTooHigh && !isRisky) return null
-
-  // Over/Under - step down the line
+  // Over/Under - always step down if above 1.5
   if (market.includes('over/under') && !market.includes('corner')) {
     const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
     if (pick.startsWith('over') && !isNaN(num)) {
       if (num >= 4.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
       if (num >= 3.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
-      if (num >= 2.5 && odds > 1.4) return { replacePick: 'Over 1.5', replaceMarket: 'Over/Under' }
-      if (num >= 1.5 && odds > 1.5) return { replacePick: 'Over 0.5', replaceMarket: 'Over/Under' }
+      if (num >= 2.5) return { replacePick: 'Over 1.5', replaceMarket: 'Over/Under' }
+      if (num >= 1.5) return { replacePick: 'Over 0.5', replaceMarket: 'Over/Under' }
     }
     if (pick.startsWith('under') && !isNaN(num)) {
       if (num <= 1.5) return { replacePick: 'Under 2.5', replaceMarket: 'Over/Under' }
     }
   }
 
-  // 1X2 - replace with Double Chance
+  // 1X2 - always replace with Double Chance
   if (market === '1x2') {
-    if ((pick === 'home' || pick === '1') && odds >= 1.8) {
+    if (pick === 'home' || pick === '1') {
       return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     }
-    if ((pick === 'away' || pick === '2') && odds >= 1.6) {
+    if (pick === 'away' || pick === '2') {
       return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
     }
-    if ((pick === 'draw' || pick === 'x') && odds >= 3.0) {
+    if (pick === 'draw' || pick === 'x') {
       return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     }
   }
 
-  // GG Yes - risky
-  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes' && odds >= 1.7) {
+  // GG Yes - replace with No
+  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes') {
     return { replacePick: 'No', replaceMarket: 'GG/NG' }
   }
 
-  // 2UP - step down
-  if (market.includes('2up')) {
-    if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
-    if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
-  }
-
-  // 1UP - step down if risky odds
-  if (market.includes('1up') && odds >= 1.8) {
+  // 2UP/1UP - step down
+  if (market.includes('2up') || market.includes('1up')) {
     if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
   }
@@ -339,8 +327,25 @@ async function batchAnalyse(
   }).join('\n')
 
   const modeInstructions = allowSwitching
-    ? `REPLACE MODE: Current slip odds are ${currentSlipOdds.toFixed(2)}, target is ${targetOdds}. For risky picks suggest a safer replacement. Examples: Over2.5 becomes Over1.5, Away Win becomes Draw/Away Double Chance, Home Win becomes Home/Draw Double Chance. Set replacePick and replaceMarket fields. Use null if pick is already safe.`
-    : 'REMOVE MODE: Set replacePick and replaceMarket to null for all.'
+  ? `REPLACE MODE: Analyse EVERY game and suggest a safer pick replacement where appropriate.
+  
+For EACH game:
+1. Look at the form data, H2H, injuries and odds
+2. If the pick has any risk factor, suggest a safer market alternative
+3. You MUST suggest replacements for ALL games where a safer option exists
+
+REPLACEMENT RULES (apply to ALL games not just risky ones):
+- Any Over 2.5, Over 3.5, Over 4.5: replace with next lower line (Over 1.5, Over 2.5)
+- Any Away Win pick: replace with Draw/Away Double Chance
+- Any Home Win where home team is NOT strong: replace with Home/Draw Double Chance  
+- Any Draw pick: replace with Home/Draw or Draw/Away Double Chance
+- Any GG Yes: replace with No if either team has defensive form
+- Any 1UP or 2UP market: replace with Double Chance equivalent
+- Only set null if pick is already the safest possible (e.g. Over 0.5, Double Chance already)
+
+Current total odds: ${currentSlipOdds.toFixed(2)}, Target: ${targetOdds}
+Be generous with replacements - replace as many as possible to be safe.`
+  : 'REMOVE MODE: Set replacePick and replaceMarket to null for all.'
 
   const prompt = `You are a professional football betting analyst.
 

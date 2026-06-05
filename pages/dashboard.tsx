@@ -183,6 +183,96 @@ const handlePayment = async () => {
       setError(err instanceof Error ? err.message : 'Failed to decode')
     } finally { setLoading(false) }
   }
+const resolveReplacedPicks = async (replacedGames: GameAnalysis[]): Promise<GameAnalysis[]> => {
+  const resolved: GameAnalysis[] = []
+
+  for (const game of replacedGames) {
+    if (!game.replaced || !game.replacedPick || !game.replacedMarketDesc) {
+      resolved.push(game)
+      continue
+    }
+
+    try {
+      // Fetch real markets from SportyBet browser-side
+      const payload = [
+        { eventId: game.eventId, marketId: '1', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '2', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '3', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '5', outcomeId: '1', specifier: null },
+      ]
+
+      const res = await fetch('https://www.sportybet.com/api/ng/factsCenter/Outcomes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': '*/*',
+          'Origin': 'https://www.sportybet.com',
+          'Referer': 'https://www.sportybet.com/ng/',
+          'Clientid': 'web',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) { resolved.push(game); continue }
+      const data = await res.json()
+      if (!data || data.bizCode !== 10000) { resolved.push(game); continue }
+
+      // Find the market and outcome
+      const allMarkets: Record<string, unknown>[] = []
+      for (const ev of (data.data || [])) {
+        for (const m of ((ev as Record<string, unknown>).markets as unknown[] || [])) {
+          allMarkets.push(m as Record<string, unknown>)
+        }
+      }
+
+      const targetMarketName = game.replacedMarketDesc!.toLowerCase()
+      const targetPickName = game.replacedPick!.toLowerCase()
+
+      const market = allMarkets.find(m => {
+        const desc = (m.desc as string || '').toLowerCase()
+        return desc === targetMarketName ||
+          desc.includes(targetMarketName) ||
+          targetMarketName.includes(desc)
+      })
+
+      if (!market) { resolved.push(game); continue }
+
+      const outcomes = (market.outcomes as unknown[] || []) as Record<string, unknown>[]
+      const outcome = outcomes.find(o => {
+        const desc = (o.desc as string || '').toLowerCase()
+        if (targetPickName.startsWith('over') || targetPickName.startsWith('under')) {
+          const tNum = parseFloat(targetPickName.replace(/[^0-9.]/g, ''))
+          const oNum = parseFloat(desc.replace(/[^0-9.]/g, ''))
+          const dir = targetPickName.startsWith('over') ? 'over' : 'under'
+          return desc.startsWith(dir) && Math.abs(oNum - tNum) < 0.1
+        }
+        return desc === targetPickName ||
+          desc.includes(targetPickName) ||
+          targetPickName.includes(desc)
+      })
+
+      if (!outcome) { resolved.push(game); continue }
+
+      const realOdds = parseFloat(String(outcome.odds || game.replacedOdds || game.odds))
+      const isActive = outcome.isActive === 1 || outcome.isActive === true
+
+      if (!isActive) { resolved.push(game); continue }
+
+      // Return game with REAL marketId, outcomeId and odds
+      resolved.push({
+        ...game,
+        marketId: String(market.id || game.marketId),
+        outcomeId: String(outcome.id || game.outcomeId),
+        replacedOdds: realOdds,
+        odds: realOdds,
+      })
+    } catch {
+      resolved.push(game)
+    }
+  }
+
+  return resolved
+}
 
  const handleAnalyse = async (e: React.FormEvent) => {
   e.preventDefault()
@@ -199,6 +289,7 @@ const handlePayment = async () => {
   setLoading(true); setError(''); setStep('analysing')
 
   try {
+    // Step 1: Run AI analysis
     const res = await fetch('/api/analyse', {
       method: 'POST', headers: authHeaders(),
       body: JSON.stringify({
@@ -213,14 +304,34 @@ const handlePayment = async () => {
     if (!res.ok) throw new Error(data.error)
     setAnalysis(data)
 
-    if (data.keptGames?.length > 0) {
+    // Step 2: For replaced games, fetch real market data from browser
+    // then rebook with real outcomeIds
+    let gamesToBook = data.keptGames as GameAnalysis[]
+
+    if (allowSwitching && data.keptGames?.some((g: GameAnalysis) => g.replaced)) {
+      // Fetch real markets for replaced games from browser
+      const replacedGames = data.keptGames.filter((g: GameAnalysis) => g.replaced)
+      const resolvedGames = await resolveReplacedPicks(replacedGames)
+
+      // Merge resolved games back
+      gamesToBook = data.keptGames.map((g: GameAnalysis) => {
+        const resolved = resolvedGames.find(r => r.eventId === g.eventId)
+        return resolved || g
+      })
+
+      // Update analysis with resolved odds
+      setAnalysis({ ...data, keptGames: gamesToBook })
+    }
+
+    if (gamesToBook?.length > 0) {
       const rebookRes = await fetch('/api/rebook', {
         method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ games: data.keptGames }),
+        body: JSON.stringify({ games: gamesToBook }),
       })
       const rebookData = await rebookRes.json()
       if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
     }
+
     setStep('result')
   } catch (err: unknown) {
     setError(err instanceof Error ? err.message : 'Analysis failed')
@@ -774,3 +885,10 @@ const handlePayment = async () => {
 function fetchMarketsClientSide(games: Game[]): Record<string, unknown> | PromiseLike<Record<string, unknown>> {
   throw new Error('Function not implemented.')
 }
+
+async function resolveReplacedPicks(replacedGames: GameAnalysis[]): Promise<GameAnalysis[]> {
+  // Currently no browser market resolution logic is implemented.
+  // Return the input games unchanged so downstream analysis can continue.
+  return replacedGames
+}
+
