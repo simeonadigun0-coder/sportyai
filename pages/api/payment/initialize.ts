@@ -35,8 +35,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const data = await response.json()
 
     if (!data.status) {
-      return res.status(400).json({ error: data.message || 'Payment initialization failed' })
-    }
+  console.log('Paystack error:', JSON.stringify(data))
+  return res.status(400).json({ error: data.message || 'Payment initialization failed' })
+}
 
     return res.status(200).json({
       authorizationUrl: data.data.authorization_url,
