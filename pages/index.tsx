@@ -83,7 +83,7 @@ export default function LandingPage() {
             <span style={{ background: 'linear-gradient(135deg,#4ade80,#16a34a)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>bad eggs</span>
           </h1>
           <p style={{ fontSize: 17, color: '#94a3b8', lineHeight: 1.7, marginBottom: 36, maxWidth: 500, margin: '0 auto 36px' }}>
-            Paste your SportyBet booking code. Our AI reads every pick, removes the weak ones, replaces risky selections with safer options, and hands you a brand new code — in seconds.
+            Paste your SportyBet booking code. We read every pick, removes the weak ones, replaces risky selections with safer options, and hands you a brand new code — in seconds.
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button onClick={() => setShowAuth('register')}
@@ -170,7 +170,7 @@ export default function LandingPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
               {[
                 { step: '01', icon: '📋', title: 'Paste Your Code', desc: 'Enter your SportyBet booking code. We decode every pick instantly.' },
-                { step: '02', icon: '🤖', title: 'AI Analyses', desc: 'We check real form, H2H, injuries and stats for every game on your slip.' },
+                { step: '02', icon: '📊', title: 'Deep Match Analysis', desc: 'We check real form, H2H, injuries and stats for every game on your slip.' },
                 { step: '03', icon: '⚡', title: 'Get Smarter Code', desc: 'Bad eggs removed. Risky picks replaced. Fresh booking code ready.' },
               ].map(item => (
                 <div key={item.step} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: '24px 18px' }}>
