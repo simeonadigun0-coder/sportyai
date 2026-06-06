@@ -76,7 +76,7 @@ export default function LandingPage() {
         {/* HERO */}
         <section style={{ padding: '80px 24px 60px', textAlign: 'center', maxWidth: 680, margin: '0 auto' }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 20, padding: '6px 14px', marginBottom: 28, fontSize: 12, color: '#4ade80', fontWeight: 600 }}>
-            ⚡ AI-Powered Bet Slip Analysis
+            ⚡ Your Slip. Stripped of Bad Picks
           </div>
           <h1 style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, letterSpacing: '-0.03em', marginBottom: 20 }}>
             Stop losing slips to<br />
@@ -247,7 +247,9 @@ export default function LandingPage() {
         {/* FOOTER */}
         <footer style={{ padding: '32px 24px', borderTop: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#16a34a,#15803d)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>⚡</div>
+            <div>
+              <Image src="/logo.png" alt="Groove Slip" width={28} height={28} style={{ objectFit: 'contain' }} />
+            </div>
             <span style={{ fontWeight: 800, fontSize: 15, color: '#fff' }}>Groove <span style={{ color: '#4ade80' }}>Slip</span></span>
           </div>
           <p style={{ fontSize: 12, color: '#334155', marginBottom: 8 }}>
