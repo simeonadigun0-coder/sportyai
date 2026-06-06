@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
+import Image from 'next/image'
 
 interface Game {
   eventId: string
@@ -391,7 +392,7 @@ if (!canAnalyse) {
           boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>⚡</div>
+            <Image src="/logo.png" alt="Groove Slip" width={30} height={30} style={{ objectFit: 'contain' }} />
             <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-0.02em' }}>
               Groove <span style={{ color: 'var(--accent)' }}>Slip</span>
             </span>
