@@ -128,7 +128,7 @@ export default function LandingPage() {
 
             {/* Arrow */}
             <div style={{ textAlign: 'center' }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#16a34a,#15803d)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', fontSize: 18 }}>⚡</div>
+              <Image src="/logo.png" alt="Groove Slip" width={40} height={40} style={{ objectFit: 'contain' }} />
               <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontWeight: 600 }}>AI<br/>EDIT</div>
             </div>
 
