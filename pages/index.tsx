@@ -43,7 +43,7 @@ export default function LandingPage() {
       <Head>
         <title>Groove Slip — Where Sharp Minds Meet Sharper Picks</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="description" content="AI-powered bet slip analyser for SportyBet Nigeria. Remove bad eggs, replace risky picks, get smarter codes." />
+        <meta name="description" content="Bet slip analyser for SportyBet Nigeria. Remove bad eggs, replace risky picks, get smarter codes." />
       </Head>
 
       <div style={{ background: '#0d1f0e', minHeight: '100vh', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
@@ -83,7 +83,7 @@ export default function LandingPage() {
             <span style={{ background: 'linear-gradient(135deg,#4ade80,#16a34a)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>bad eggs</span>
           </h1>
           <p style={{ fontSize: 17, color: '#94a3b8', lineHeight: 1.7, marginBottom: 36, maxWidth: 500, margin: '0 auto 36px' }}>
-            Paste your SportyBet booking code. We read every pick, removes the weak ones, replaces risky selections with safer options, and hands you a brand new code — in seconds.
+            Paste your SportyBet booking code. We read every pick, remove the weak ones, replace risky selections with safer options, and hand you a brand new code — in seconds.
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button onClick={() => setShowAuth('register')}
@@ -102,7 +102,8 @@ export default function LandingPage() {
 
         {/* BEFORE/AFTER */}
         <section style={{ padding: '20px 24px 60px', maxWidth: 720, margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 16, alignItems: 'center' }}>
+          <div className="before-after-grid" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 16, alignItems: 'center' }}>
+
             {/* Before */}
             <div style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.15)', borderRadius: 14, padding: '16px' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#f87171', marginBottom: 12, letterSpacing: '0.06em' }}>❌ BEFORE — Original Slip</div>
@@ -126,10 +127,10 @@ export default function LandingPage() {
               </div>
             </div>
 
-            {/* Arrow */}
-            <div style={{ textAlign: 'center' }}>
+            {/* GS Edit Badge */}
+            <div className="gs-edit-badge" style={{ textAlign: 'center' }}>
               <Image src="/logo.png" alt="Groove Slip" width={40} height={40} style={{ objectFit: 'contain' }} />
-              <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontWeight: 600 }}>GS<br/>EDIT</div>
+              <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontWeight: 600 }}>GS<br />EDIT</div>
             </div>
 
             {/* After */}
@@ -167,7 +168,7 @@ export default function LandingPage() {
           <div style={{ maxWidth: 680, margin: '0 auto', textAlign: 'center' }}>
             <h2 style={{ fontSize: 30, fontWeight: 800, marginBottom: 8, letterSpacing: '-0.02em' }}>How it works</h2>
             <p style={{ color: '#64748b', marginBottom: 48, fontSize: 15 }}>Three steps. Thirty seconds. Smarter slip.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+            <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
               {[
                 { step: '01', icon: '📋', title: 'Paste Your Code', desc: 'Enter your SportyBet booking code. We decode every pick instantly.' },
                 { step: '02', icon: '📊', title: 'Deep Match Analysis', desc: 'We check real form, H2H, injuries and stats for every game on your slip.' },
@@ -188,7 +189,7 @@ export default function LandingPage() {
         <section style={{ padding: '60px 24px', maxWidth: 680, margin: '0 auto' }}>
           <h2 style={{ fontSize: 30, fontWeight: 800, marginBottom: 8, textAlign: 'center', letterSpacing: '-0.02em' }}>Built for serious punters</h2>
           <p style={{ color: '#64748b', marginBottom: 48, fontSize: 15, textAlign: 'center' }}>Every feature designed to protect your slip</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             {[
               { icon: '📊', title: 'Real Match Data', desc: 'BSD and Sofascore databases with live form, H2H and injury reports' },
               { icon: '🔄', title: 'Smart Replacements', desc: 'Risky picks swapped for safer alternatives — Over 2.5 becomes Over 1.5' },
@@ -224,7 +225,7 @@ export default function LandingPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28, textAlign: 'left' }}>
                 {[
                   'Unlimited slip analyses',
-                  'AI pick replacement',
+                  'Smart pick replacement',
                   'Real-time match data',
                   'Fresh booking codes',
                   'Win/loss tracking',
@@ -247,9 +248,7 @@ export default function LandingPage() {
         {/* FOOTER */}
         <footer style={{ padding: '32px 24px', borderTop: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
-            <div>
-              <Image src="/logo.png" alt="Groove Slip" width={28} height={28} style={{ objectFit: 'contain' }} />
-            </div>
+            <Image src="/logo.png" alt="Groove Slip" width={28} height={28} style={{ objectFit: 'contain' }} />
             <span style={{ fontWeight: 800, fontSize: 15, color: '#fff' }}>Groove <span style={{ color: '#4ade80' }}>Slip</span></span>
           </div>
           <p style={{ fontSize: 12, color: '#334155', marginBottom: 8 }}>
@@ -281,7 +280,6 @@ export default function LandingPage() {
                   style={{ background: 'none', color: '#64748b', fontSize: 20, cursor: 'pointer', border: 'none' }}>×</button>
               </div>
 
-              {/* Tabs */}
               <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 4, marginBottom: 20 }}>
                 {(['login', 'register'] as const).map(m => (
                   <button key={m} onClick={() => { setShowAuth(m); setError(''); setPending(false) }}
@@ -363,6 +361,15 @@ export default function LandingPage() {
           h1 { font-size: 32px !important; }
           .grid-3 { grid-template-columns: 1fr !important; }
           .grid-2 { grid-template-columns: 1fr !important; }
+          .before-after-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .gs-edit-badge {
+            display: flex !important;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 0;
+          }
         }
       `}</style>
     </>
