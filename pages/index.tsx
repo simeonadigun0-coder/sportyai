@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
+import Image from 'next/image'
 
 export default function AuthPage() {
   const router = useRouter()
@@ -30,9 +31,10 @@ export default function AuthPage() {
       if (data.pending) { setPending(true); return }
       if (!res.ok) throw new Error(data.error || 'Something went wrong')
       if (data.token) localStorage.setItem('token', data.token)
-if (data.user?.subscriptionExpiry) localStorage.setItem('subscriptionExpiry', data.user.subscriptionExpiry)
-if (data.user?.subscriptionWaived) localStorage.setItem('subscriptionWaived', String(data.user.subscriptionWaived))
-router.push('/dashboard')
+      if (data.user?.subscriptionExpiry) localStorage.setItem('subscriptionExpiry', data.user.subscriptionExpiry)
+      if (data.user?.subscriptionWaived) localStorage.setItem('subscriptionWaived', String(data.user.subscriptionWaived))
+        localStorage.setItem('freeAnalysisUsed', String(data.user?.freeAnalysisUsed || false))
+      router.push('/dashboard')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed')
     } finally {
@@ -71,7 +73,7 @@ router.push('/dashboard')
           backgroundSize: '60px 60px',
         }} />
 
-        {/* Left Panel — visible on desktop */}
+        {/* Left Panel */}
         <div style={{
           flex: 1,
           display: 'flex',
@@ -81,14 +83,16 @@ router.push('/dashboard')
           position: 'relative',
           zIndex: 1,
         }} className="left-panel">
-          {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 56 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: 'linear-gradient(135deg, #16a34a, #15803d)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 20, boxShadow: '0 4px 16px rgba(22,163,74,0.4)',
-            }}>⚡</div>
+
+          {/* Logo — desktop */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 56 }}>
+            <Image
+              src="/logo.png"
+              alt="Groove Slip"
+              width={44}
+              height={44}
+              style={{ objectFit: 'contain' }}
+            />
             <span style={{ fontWeight: 800, fontSize: 20, color: '#fff', letterSpacing: '-0.02em' }}>
               Groove <span style={{ color: '#4ade80' }}>Slip</span>
             </span>
@@ -166,12 +170,15 @@ router.push('/dashboard')
             <div className="mobile-logo" style={{ textAlign: 'center', marginBottom: 32 }}>
               <div style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 52, height: 52, borderRadius: 14,
-                background: 'linear-gradient(135deg, #16a34a, #15803d)',
                 marginBottom: 12,
-                boxShadow: '0 4px 20px rgba(22,163,74,0.4)',
               }}>
-                <span style={{ fontSize: 24 }}>⚡</span>
+                <Image
+                  src="/logo.png"
+                  alt="Groove Slip"
+                  width={56}
+                  height={56}
+                  style={{ objectFit: 'contain' }}
+                />
               </div>
               <h1 style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
                 Groove <span style={{ color: '#4ade80' }}>Slip</span>

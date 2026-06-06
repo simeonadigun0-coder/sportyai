@@ -66,9 +66,13 @@ export default function Dashboard() {
   const [subscriptionExpiry, setSubscriptionExpiry] = useState<string | null>(null)
   const [showPayment, setShowPayment] = useState(false)
   const [paymentLoading, setPaymentLoading] = useState(false)
+  const [freeAnalysisUsed, setFreeAnalysisUsed] = useState(false)
+const [showFreeTrialPrompt, setShowFreeTrialPrompt] = useState(false)
   useEffect(() => {
   const token = localStorage.getItem('token')
   if (!token) { router.push('/'); return }
+  const freeUsed = localStorage.getItem('freeAnalysisUsed')
+setFreeAnalysisUsed(freeUsed === 'true')
   try {
     const payload = JSON.parse(atob(token.split('.')[1]))
     setUsername(payload.username)
@@ -278,10 +282,14 @@ const resolveReplacedPicks = async (replacedGames: GameAnalysis[]): Promise<Game
   e.preventDefault()
   if (!slip) return
 
-  if (!subscriptionActive) {
-    setShowPayment(true)
-    return
-  }
+  // Check access
+const freeTrialAvailable = !freeAnalysisUsed && !isAdmin
+const canAnalyse = subscriptionActive || isAdmin || freeTrialAvailable
+
+if (!canAnalyse) {
+  setShowPayment(true)
+  return
+}
 
   if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
   const target = parseFloat(targetOdds)
@@ -303,6 +311,11 @@ const resolveReplacedPicks = async (replacedGames: GameAnalysis[]): Promise<Game
     const data = await res.json()
     if (!res.ok) throw new Error(data.error)
     setAnalysis(data)
+  if (data.wasFreeTrial) {
+  localStorage.setItem('freeAnalysisUsed', 'true')
+  setFreeAnalysisUsed(true)
+  setShowFreeTrialPrompt(true)
+}
 
     // Step 2: For replaced games, fetch real market data from browser
     // then rebook with real outcomeIds
@@ -556,7 +569,9 @@ const resolveReplacedPicks = async (replacedGames: GameAnalysis[]): Promise<Game
                     min={1} step="any" required />
                   {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div>}
                   <button type="submit" className="btn-primary" disabled={loading || allowSwitching === null}>
-                    🤖 Analyse & Clean Slip
+                    {loading ? '⏳ Analysing...' : !subscriptionActive && !isAdmin && !freeAnalysisUsed
+  ? '🎁 Analyse Free (1 free trial)'
+  : '🧹 Analyse & Clean Slip'}
                   </button>
                   {allowSwitching === null && (
                     <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' }}>
@@ -788,6 +803,40 @@ const resolveReplacedPicks = async (replacedGames: GameAnalysis[]): Promise<Game
               </button>
             </div>
           )}
+          {/* Free Trial Used Prompt */}
+{showFreeTrialPrompt && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1000, padding: 20,
+  }}>
+    <div style={{
+      background: '#fff', borderRadius: 20, padding: 28,
+      maxWidth: 380, width: '100%',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 44, marginBottom: 12 }}>🎉</div>
+      <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>Free Trial Used</h3>
+      <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
+        You've used your free analysis. Subscribe to keep optimising your slips.
+      </p>
+      <button onClick={() => { setShowFreeTrialPrompt(false); setShowPayment(true) }} style={{
+        background: 'linear-gradient(135deg, #16a34a, #15803d)',
+        color: '#fff', padding: '12px 24px', borderRadius: 10,
+        fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer', width: '100%',
+      }}>
+        Subscribe — ₦2,500/month
+      </button>
+      <button onClick={() => setShowFreeTrialPrompt(false)} style={{
+        marginTop: 10, background: 'transparent', border: 'none',
+        color: '#94a3b8', fontSize: 13, cursor: 'pointer',
+      }}>
+        Maybe later
+      </button>
+    </div>
+  </div>
+)}
           {/* Payment Modal */}
 {showPayment && (
   <div style={{

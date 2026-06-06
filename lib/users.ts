@@ -13,8 +13,8 @@ export interface User {
   isAdmin: boolean
   subscriptionWaived?: boolean
   subscriptionExpiry?: string | null
+  freeAnalysisUsed?: boolean
 }
-
 export async function findUserByEmail(email: string): Promise<User | undefined> {
   const user = await redis.get<User>(`user:email:${email.toLowerCase()}`)
   return user || undefined
@@ -160,4 +160,17 @@ export async function getLastSeen(userId: string): Promise<string | null> {
   try {
     return await redis.get<string>(`user:lastseen:${userId}`)
   } catch { return null }
+}
+export async function markFreeAnalysisUsed(id: string): Promise<void> {
+  let user = await findUserById(id)
+  if (!user) {
+    const emailKeys = await redis.keys('user:email:*')
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    user = users.find(u => u?.id === id) as User | undefined
+  }
+  if (!user) return
+  const updated = { ...user, freeAnalysisUsed: true }
+  await redis.set(`user:id:${id}`, updated)
+  await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
+  await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
 }

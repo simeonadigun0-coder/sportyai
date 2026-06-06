@@ -41,6 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       subscriptionActive,
       subscriptionExpiry: user.subscriptionExpiry,
       subscriptionWaived: user.subscriptionWaived,
+      freeAnalysisUsed: user.freeAnalysisUsed || false,
     },
   })
 }
