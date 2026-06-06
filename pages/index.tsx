@@ -129,7 +129,7 @@ export default function LandingPage() {
             {/* Arrow */}
             <div style={{ textAlign: 'center' }}>
               <Image src="/logo.png" alt="Groove Slip" width={40} height={40} style={{ objectFit: 'contain' }} />
-              <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontWeight: 600 }}>AI<br/>EDIT</div>
+              <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontWeight: 600 }}>GS<br/>EDIT</div>
             </div>
 
             {/* After */}
@@ -158,7 +158,7 @@ export default function LandingPage() {
             </div>
           </div>
           <p style={{ textAlign: 'center', fontSize: 12, color: '#475569', marginTop: 16 }}>
-            Boca Juniors removed (6.75 odds, poor away form). PSG pick replaced with safer Draw/Away.
+            Boca Juniors removed (6.75 odds, poor away form). Arsenal pick replaced with safer Draw/Away.
           </p>
         </section>
 
