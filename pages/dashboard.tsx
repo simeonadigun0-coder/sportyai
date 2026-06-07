@@ -277,6 +277,8 @@ export default function Dashboard() {
 
     const finalAnalysis = { ...data, keptGames: finalKeptGames }
     setAnalysis(finalAnalysis)
+    console.log('REPLACED GAMES:', JSON.stringify(finalKeptGames.filter((g: GameAnalysis) => g.replaced), null, 2))
+console.log('REBOOK PAYLOAD:', JSON.stringify(finalKeptGames.map((g: GameAnalysis) => ({ eventId: g.eventId, marketId: g.marketId, outcomeId: g.outcomeId, pick: g.pick, replaced: g.replaced })), null, 2))
 
     // Step 3 — Generate booking code with real IDs
     if (finalKeptGames.length > 0) {
@@ -766,7 +768,7 @@ export default function Dashboard() {
 
               {/* WhatsApp */}
               <div style={{ textAlign: 'center', marginTop: 20 }}>
-                <a href="https://wa.me/2349036592571" target="_blank" rel="noopener noreferrer"
+                <a href="https://wa.me/2349075520182" target="_blank" rel="noopener noreferrer"
                   style={{ fontSize: 13, color: '#25D366', textDecoration: 'none', fontWeight: 600 }}>
                   💬 Encounter a challenge? Contact Support
                 </a>
