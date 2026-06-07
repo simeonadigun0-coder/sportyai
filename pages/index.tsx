@@ -26,7 +26,6 @@ export default function LandingPage() {
         credentials: 'include',
       })
       const data = await res.json()
-      if (data.pending) { setPending(true); return }
       if (!res.ok) throw new Error(data.error || 'Something went wrong')
       if (data.token) localStorage.setItem('token', data.token)
       if (data.user?.subscriptionExpiry) localStorage.setItem('subscriptionExpiry', data.user.subscriptionExpiry)
@@ -296,16 +295,7 @@ export default function LandingPage() {
                 ))}
               </div>
 
-              {pending ? (
-                <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                  <div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div>
-                  <h4 style={{ color: '#fff', fontWeight: 700, marginBottom: 8 }}>Account Submitted!</h4>
-                  <p style={{ color: '#64748b', fontSize: 13, lineHeight: 1.6 }}>
-                    Pending admin approval. You will get an email once approved.
-                  </p>
-                </div>
-              ) : (
-                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {showAuth === 'register' && (
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>USERNAME</label>
@@ -347,7 +337,6 @@ export default function LandingPage() {
                     </p>
                   )}
                 </form>
-              )}
             </div>
           </div>
         )}

@@ -127,7 +127,7 @@ export async function createUser(
     email,
     passwordHash,
     createdAt: new Date().toISOString(),
-    status: isAdmin ? 'approved' : 'pending',
+    status: 'approved',
     isAdmin,
     subscriptionWaived: isAdmin,
     subscriptionExpiry: null,
