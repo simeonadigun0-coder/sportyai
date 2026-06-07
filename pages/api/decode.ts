@@ -16,7 +16,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': '*/*',
         'Accept-Language': 'en',
         'Origin': 'https://www.sportybet.com',
@@ -43,9 +43,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const games = outcomes.map((item: unknown, index: number) => {
       const g = item as Record<string, unknown>
-      
-      // Get the EXACT original selection for this game
       const sel = (selections[index] || {}) as Record<string, unknown>
+
       const exactEventId = String(sel.eventId || g.eventId || index)
       const exactMarketId = String(sel.marketId || '1')
       const exactOutcomeId = String(sel.outcomeId || '1')
@@ -56,33 +55,62 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const category = sport?.category as Record<string, unknown>
       const tournament = category?.tournament as Record<string, unknown>
       const league = (tournament?.name as string) || ''
-      const markets = (g.markets as unknown[]) || []
 
-      let odds = 1
-      let pick = ''
-      let market = '1X2'
+      // Extract ALL available markets and outcomes from the decode response
+      const rawMarkets = (g.markets as unknown[]) || []
+      let odds = 1, pick = '', market = '1X2'
 
-      if (markets.length > 0) {
-        const firstMarket = markets[0] as Record<string, unknown>
-        market = (firstMarket.desc as string) || '1X2'
+      // Build full available markets map for this game
+      const availableMarkets: Array<{
+        id: string
+        desc: string
+        outcomes: Array<{ id: string; desc: string; odds: number }>
+      }> = []
 
-        const outs = (firstMarket.outcomes as unknown[]) || []
+      rawMarkets.forEach((rm: unknown) => {
+        const m = rm as Record<string, unknown>
+        const mDesc = (m.desc as string) || (m.name as string) || ''
+        const mId = String(m.id || '')
+        const mOuts = (m.outcomes as unknown[]) || []
 
-        // Match the EXACT outcomeId from the original selection
-        const matched = outs.find((o: unknown) => {
-          const oc = o as Record<string, unknown>
-          return String(oc.id) === exactOutcomeId
-        }) as Record<string, unknown> | undefined
+        const mappedOutcomes = mOuts
+          .map((o: unknown) => {
+            const oc = o as Record<string, unknown>
+            return {
+              id: String(oc.id || ''),
+              desc: (oc.desc as string) || '',
+              odds: parseFloat(String(oc.odds || 1)),
+              isActive: oc.isActive === 1 || oc.isActive === true,
+            }
+          })
+          .filter(o => o.isActive && o.odds > 1.0)
 
-        if (matched) {
-          odds = parseFloat(String(matched.odds || 1))
-          pick = (matched.desc as string) || ''
-        } else if (outs.length > 0) {
-          const first = outs[0] as Record<string, unknown>
-          odds = parseFloat(String(first.odds || 1))
-          pick = (first.desc as string) || ''
+        if (mOuts.length > 0) {
+          availableMarkets.push({
+            id: mId,
+            desc: mDesc,
+            outcomes: mappedOutcomes,
+          })
         }
-      }
+
+        // The first market is the selected one
+        if (availableMarkets.length === 1) {
+          market = mDesc || '1X2'
+          const matched = mOuts.find((o: unknown) => {
+            const oc = o as Record<string, unknown>
+            return String(oc.id) === exactOutcomeId
+          }) as Record<string, unknown> | undefined
+
+          if (matched) {
+            odds = parseFloat(String(matched.odds || 1))
+            pick = (matched.desc as string) || ''
+          } else if (mOuts.length > 0) {
+            const first = mOuts[0] as Record<string, unknown>
+            odds = parseFloat(String(first.odds || 1))
+            pick = (first.desc as string) || ''
+          }
+        }
+      })
 
       return {
         eventId: exactEventId,
@@ -97,6 +125,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         kickoffTime: String(g.estimateStartTime || ''),
         league,
         sport: sportName,
+        // KEY: Pass all available markets so replacement can use real IDs
+        availableMarkets,
       }
     })
 

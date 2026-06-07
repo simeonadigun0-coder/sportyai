@@ -16,6 +16,11 @@ interface Game {
   league: string
   kickoffTime: string
   sport: string
+  availableMarkets?: Array<{
+    id: string
+    desc: string
+    outcomes: Array<{ id: string; desc: string; odds: number }>
+  }>
 }
 
 interface GameAnalysis extends Game {
@@ -240,7 +245,6 @@ export default function Dashboard() {
   setLoading(true); setError(''); setStep('analysing')
 
   try {
-    // Step 1 — Run AI analysis on server
     const res = await fetch('/api/analyse', {
       method: 'POST', headers: authHeaders(),
       body: JSON.stringify({
@@ -259,32 +263,13 @@ export default function Dashboard() {
       setFreeAnalysisUsed(true)
     }
 
-    // Step 2 — For replaced games, fetch real marketId/outcomeId from browser
-    let finalKeptGames = [...(data.keptGames || [])]
+    setAnalysis(data)
 
-    if (allowSwitching) {
-      const replacedGames = finalKeptGames.filter((g: GameAnalysis) => g.replaced && g.needsResolution)
-
-      if (replacedGames.length > 0) {
-        const resolved = await resolveReplacementsClientSide(replacedGames)
-        // Merge resolved IDs back into kept games
-        finalKeptGames = finalKeptGames.map((g: GameAnalysis) => {
-          const r = resolved.find(x => x.eventId === g.eventId)
-          return r ? { ...g, ...r } : g
-        })
-      }
-    }
-
-    const finalAnalysis = { ...data, keptGames: finalKeptGames }
-    setAnalysis(finalAnalysis)
-    console.log('REPLACED GAMES:', JSON.stringify(finalKeptGames.filter((g: GameAnalysis) => g.replaced), null, 2))
-console.log('REBOOK PAYLOAD:', JSON.stringify(finalKeptGames.map((g: GameAnalysis) => ({ eventId: g.eventId, marketId: g.marketId, outcomeId: g.outcomeId, pick: g.pick, replaced: g.replaced })), null, 2))
-
-    // Step 3 — Generate booking code with real IDs
-    if (finalKeptGames.length > 0) {
+    // Generate booking code — replaced games now have real IDs from server
+    if (data.keptGames?.length > 0) {
       const rebookRes = await fetch('/api/rebook', {
         method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ games: finalKeptGames }),
+        body: JSON.stringify({ games: data.keptGames }),
       })
       const rebookData = await rebookRes.json()
       if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
@@ -298,7 +283,6 @@ console.log('REBOOK PAYLOAD:', JSON.stringify(finalKeptGames.map((g: GameAnalysi
     setStep('decoded')
   } finally { setLoading(false) }
 }
-
   const handlePayment = async () => {
     setPaymentLoading(true)
     try {

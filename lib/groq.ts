@@ -33,6 +33,7 @@ export interface GameAnalysis extends SportyBetGame {
   replacedMarketDesc?: string
   replacedOdds?: number
   replacementReason?: string
+  needsResolution?: boolean
 }
 
 export interface SlipAnalysis {
@@ -516,7 +517,22 @@ export async function analyseSlip(
     if (allowSwitching && result?.replacePick && result?.replaceMarket) {
       const newPick = result.replacePick
       const newMarket = result.replaceMarket
-      const estimatedOdds = estimateSaferOdds(game.odds, game.pick, newPick, newMarket)
+
+      // Try to resolve real IDs from markets already in the decode response
+      const resolved = game.availableMarkets?.length
+        ? resolveFromAvailableMarkets(
+            game.availableMarkets,
+            newPick,
+            newMarket,
+            game.odds
+          )
+        : null
+
+      const finalMarketId = resolved?.marketId || game.marketId
+      const finalOutcomeId = resolved?.outcomeId || game.outcomeId
+      const finalOdds = resolved?.realOdds || estimateSaferOdds(game.odds, game.pick, newPick, newMarket)
+      const resolvedSuccessfully = !!resolved
+
       return {
         ...baseResult,
         keep: true,
@@ -526,13 +542,12 @@ export async function analyseSlip(
         originalOdds: game.odds,
         replacedPick: newPick,
         replacedMarketDesc: newMarket,
-        replacedOdds: estimatedOdds,
+        replacedOdds: finalOdds,
         replacementReason: result.reason || `Safer option: ${newPick} in ${newMarket}`,
-        // Use original IDs for now — browser will resolve real IDs client-side
-        marketId: game.marketId,
-        outcomeId: game.outcomeId,
-        // Flag for client-side resolution
-        needsResolution: true,
+        // Use REAL IDs if resolved, otherwise original
+        marketId: finalMarketId,
+        outcomeId: finalOutcomeId,
+        needsResolution: !resolvedSuccessfully,
       }
     }
 
