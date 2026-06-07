@@ -34,6 +34,7 @@ interface GameAnalysis extends Game {
   replacedMarketDesc?: string
   replacedOdds?: number
   replacementReason?: string
+  needsResolution?: boolean
 }
 
 interface SlipAnalysis {
@@ -111,52 +112,190 @@ export default function Dashboard() {
       setError(err instanceof Error ? err.message : 'Failed to decode')
     } finally { setLoading(false) }
   }
+  const resolveReplacementsClientSide = async (
+  replacedGames: GameAnalysis[]
+): Promise<Array<{ eventId: string; marketId: string; outcomeId: string; replacedOdds: number; needsResolution: false }>> => {
+  const results = []
+
+  for (const game of replacedGames) {
+    if (!game.replacedPick || !game.replacedMarketDesc) continue
+
+    try {
+      // Fetch real markets from SportyBet directly from browser
+      // Browser is NOT blocked by SportyBet (only Vercel server IPs are)
+      const payload = [
+        { eventId: game.eventId, marketId: '1', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '2', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '3', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '4', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '5', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '18', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '21', outcomeId: '1', specifier: null },
+        { eventId: game.eventId, marketId: '29', outcomeId: '1', specifier: null },
+      ]
+
+      const res = await fetch('https://www.sportybet.com/api/ng/factsCenter/Outcomes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': '*/*',
+          'Origin': 'https://www.sportybet.com',
+          'Referer': 'https://www.sportybet.com/ng/',
+          'Clientid': 'web',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) continue
+      const data = await res.json()
+      if (!data || data.bizCode !== 10000) continue
+
+      // Build markets list from response
+      const marketsMap = new Map<string, { id: string; desc: string; outcomes: Array<{ id: string; desc: string; odds: number; isActive: boolean }> }>()
+
+      for (const ev of (data.data || [])) {
+        for (const m of (ev.markets || [])) {
+          if (!marketsMap.has(m.id)) {
+            marketsMap.set(m.id, {
+              id: m.id,
+              desc: m.desc || m.name || '',
+              outcomes: (m.outcomes || [])
+                .filter((o: { isActive: number | boolean }) => o.isActive === 1 || o.isActive === true)
+                .map((o: { id: string; desc: string; odds: string }) => ({
+                  id: o.id,
+                  desc: o.desc || '',
+                  odds: parseFloat(String(o.odds || 1)),
+                  isActive: true,
+                }))
+            })
+          }
+        }
+      }
+
+      const allMarkets = Array.from(marketsMap.values())
+      const targetMarket = game.replacedMarketDesc!.toLowerCase()
+      const targetPick = game.replacedPick!.toLowerCase()
+
+      // Find matching market
+      const market = allMarkets.find(m => {
+        const d = m.desc.toLowerCase()
+        return d === targetMarket || d.includes(targetMarket) || targetMarket.includes(d)
+      })
+
+      if (!market) continue
+
+      // Find matching outcome
+      const outcome = market.outcomes.find(o => {
+        const d = o.desc.toLowerCase()
+
+        // Numeric Over/Under match
+        if (targetPick.startsWith('over') || targetPick.startsWith('under')) {
+          const tNum = parseFloat(targetPick.replace(/[^0-9.]/g, ''))
+          const dNum = parseFloat(d.replace(/[^0-9.]/g, ''))
+          const dir = targetPick.startsWith('over') ? 'over' : 'under'
+          if (!isNaN(tNum) && !isNaN(dNum)) {
+            return d.startsWith(dir) && Math.abs(dNum - tNum) < 0.1
+          }
+        }
+
+        // Double Chance
+        if (targetPick === 'home/draw') return d === 'home/draw' || d === '1x' || d.includes('home') && d.includes('draw')
+        if (targetPick === 'draw/away') return d === 'draw/away' || d === 'x2' || d.includes('draw') && d.includes('away')
+        if (targetPick === 'home/away') return d === 'home/away' || d === '12'
+
+        return d === targetPick || d.includes(targetPick) || targetPick.includes(d)
+      })
+
+      if (!outcome) continue
+
+      // Only use if genuinely safer odds
+      if (outcome.odds >= (game.originalOdds || game.odds)) continue
+      if (outcome.odds <= 1.02) continue
+
+      results.push({
+        eventId: game.eventId,
+        marketId: market.id,
+        outcomeId: outcome.id,
+        replacedOdds: outcome.odds,
+        needsResolution: false as const,
+      })
+
+    } catch { continue }
+  }
+
+  return results
+}
 
   const handleAnalyse = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!slip) return
+  e.preventDefault()
+  if (!slip) return
 
-    const freeTrialAvailable = !freeAnalysisUsed && !isAdmin
-    const canAnalyse = subscriptionActive || isAdmin || freeTrialAvailable
-    if (!canAnalyse) { setShowPayment(true); return }
-    if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
-    const target = parseFloat(targetOdds)
-    if (!target || target < 1) { setError('Enter valid target odds'); return }
+  const freeTrialAvailable = !freeAnalysisUsed && !isAdmin
+  const canAnalyse = subscriptionActive || isAdmin || freeTrialAvailable
+  if (!canAnalyse) { setShowPayment(true); return }
+  if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
+  const target = parseFloat(targetOdds)
+  if (!target || target < 1) { setError('Enter valid target odds'); return }
 
-    setLoading(true); setError(''); setStep('analysing')
-    try {
-      const res = await fetch('/api/analyse', {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({
-          games: slip.games, targetOdds: target,
-          originalTotalOdds: slip.totalOdds,
-          allowSwitching, clientMarkets: {},
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setAnalysis(data)
+  setLoading(true); setError(''); setStep('analysing')
 
-      if (data.wasFreeTrial) {
-        localStorage.setItem('freeAnalysisUsed', 'true')
-        setFreeAnalysisUsed(true)
-        setShowFreeTrialPrompt(true)
-      }
+  try {
+    // Step 1 — Run AI analysis on server
+    const res = await fetch('/api/analyse', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({
+        games: slip.games,
+        targetOdds: target,
+        originalTotalOdds: slip.totalOdds,
+        allowSwitching,
+        clientMarkets: {},
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error)
 
-      if (data.keptGames?.length > 0) {
-        const rebookRes = await fetch('/api/rebook', {
-          method: 'POST', headers: authHeaders(),
-          body: JSON.stringify({ games: data.keptGames }),
+    if (data.wasFreeTrial) {
+      localStorage.setItem('freeAnalysisUsed', 'true')
+      setFreeAnalysisUsed(true)
+    }
+
+    // Step 2 — For replaced games, fetch real marketId/outcomeId from browser
+    let finalKeptGames = [...(data.keptGames || [])]
+
+    if (allowSwitching) {
+      const replacedGames = finalKeptGames.filter((g: GameAnalysis) => g.replaced && g.needsResolution)
+
+      if (replacedGames.length > 0) {
+        const resolved = await resolveReplacementsClientSide(replacedGames)
+        // Merge resolved IDs back into kept games
+        finalKeptGames = finalKeptGames.map((g: GameAnalysis) => {
+          const r = resolved.find(x => x.eventId === g.eventId)
+          return r ? { ...g, ...r } : g
         })
-        const rebookData = await rebookRes.json()
-        if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
       }
-      setStep('result')
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Analysis failed')
-      setStep('decoded')
-    } finally { setLoading(false) }
-  }
+    }
+
+    const finalAnalysis = { ...data, keptGames: finalKeptGames }
+    setAnalysis(finalAnalysis)
+
+    // Step 3 — Generate booking code with real IDs
+    if (finalKeptGames.length > 0) {
+      const rebookRes = await fetch('/api/rebook', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ games: finalKeptGames }),
+      })
+      const rebookData = await rebookRes.json()
+      if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
+    }
+
+    setStep('result')
+    if (data.wasFreeTrial) setShowFreeTrialPrompt(true)
+
+  } catch (err: unknown) {
+    setError(err instanceof Error ? err.message : 'Analysis failed')
+    setStep('decoded')
+  } finally { setLoading(false) }
+}
 
   const handlePayment = async () => {
     setPaymentLoading(true)
@@ -694,4 +833,10 @@ export default function Dashboard() {
       </div>
     </>
   )
+}
+
+async function resolveReplacementsClientSide(replacedGames: GameAnalysis[]): Promise<GameAnalysis[]> {
+  // Browser-side replacement resolution is not available yet.
+  // Return the input data so the merge step can continue safely.
+  return replacedGames
 }

@@ -517,24 +517,22 @@ export async function analyseSlip(
       const newPick = result.replacePick
       const newMarket = result.replaceMarket
       const estimatedOdds = estimateSaferOdds(game.odds, game.pick, newPick, newMarket)
-
       return {
         ...baseResult,
         keep: true,
         replaced: true,
-        // Preserve original info for display
         originalPick: game.pick,
         originalMarket: game.market,
         originalOdds: game.odds,
-        // New pick info for display
         replacedPick: newPick,
         replacedMarketDesc: newMarket,
         replacedOdds: estimatedOdds,
         replacementReason: result.reason || `Safer option: ${newPick} in ${newMarket}`,
-        // IMPORTANT: Keep original marketId/outcomeId for booking
-        // The booking uses original selection — replacement is advisory
+        // Use original IDs for now — browser will resolve real IDs client-side
         marketId: game.marketId,
         outcomeId: game.outcomeId,
+        // Flag for client-side resolution
+        needsResolution: true,
       }
     }
 
