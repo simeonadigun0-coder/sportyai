@@ -1,4 +1,4 @@
-const CACHE_NAME = 'groove-slip-v1'
+const CACHE_NAME = 'groove-slip-v3'
 const STATIC_ASSETS = [
   '/',
   '/dashboard',
