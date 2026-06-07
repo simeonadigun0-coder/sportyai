@@ -254,7 +254,7 @@ export default function LandingPage() {
           <p style={{ fontSize: 12, color: '#334155', marginBottom: 8 }}>
             18+ only · Bet responsibly · For entertainment purposes only
           </p>
-          <a href="https://wa.me/2349036592571" target="_blank" rel="noopener noreferrer"
+          <a href="https://wa.me/2349075520182" target="_blank" rel="noopener noreferrer"
             style={{ fontSize: 12, color: '#25D366', textDecoration: 'none', fontWeight: 600 }}>
             💬 Support on WhatsApp
           </a>
