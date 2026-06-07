@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk'
-import { SportyBetGame } from './sportybet'
+import { SportyBetGame, resolveFromAvailableMarkets } from './sportybet'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 const BSD_TOKEN = process.env.BSD_API_KEY || ''
