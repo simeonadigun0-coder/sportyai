@@ -266,17 +266,53 @@ export default function Dashboard() {
     setAnalysis(data)
 
     // Generate booking code — replaced games now have real IDs from server
+    let rebookCode = ''
     if (data.keptGames?.length > 0) {
       const rebookRes = await fetch('/api/rebook', {
         method: 'POST', headers: authHeaders(),
         body: JSON.stringify({ games: data.keptGames }),
       })
       const rebookData = await rebookRes.json()
-      if (rebookRes.ok && rebookData.code) setNewCode(rebookData.code)
+      if (rebookRes.ok && rebookData.code) {
+        rebookCode = rebookData.code
+        setNewCode(rebookData.code)
+      }
     }
 
     setStep('result')
     if (data.wasFreeTrial) setShowFreeTrialPrompt(true)
+
+    // Auto-save slip to history
+    if (data.keptGames?.length > 0) {
+      try {
+        await fetch('/api/slips/save', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            bookingCode: rebookCode || 'N/A',
+            originalCode: slip?.shareCode || '',
+            originalOdds: data.originalOdds,
+            newOdds: data.newOdds,
+            targetOdds: target,
+            games: data.keptGames.map((g: GameAnalysis) => ({
+              eventId: g.eventId,
+              homeTeam: g.homeTeam,
+              awayTeam: g.awayTeam,
+              pick: g.replacedPick || g.pick,
+              market: g.replacedMarketDesc || g.market,
+              odds: g.replacedOdds || g.odds,
+              league: g.league,
+              kickoffTime: g.kickoffTime,
+              replaced: g.replaced || false,
+              originalPick: g.originalPick,
+              originalOdds: g.originalOdds,
+            })),
+            removedCount: data.removedGames?.length || 0,
+            replacedCount: data.keptGames?.filter((g: GameAnalysis) => g.replaced).length || 0,
+          }),
+        })
+      } catch { /* non-critical */ }
+    }
 
   } catch (err: unknown) {
     setError(err instanceof Error ? err.message : 'Analysis failed')
@@ -750,8 +786,11 @@ export default function Dashboard() {
                 Analyse Another Slip
               </button>
 
-              {/* WhatsApp */}
-              <div style={{ textAlign: 'center', marginTop: 20 }}>
+              <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button onClick={() => router.push('/history')}
+                  style={{ width: '100%', padding: '12px', background: '#fff', color: '#1a3d1e', border: '1.5px solid #1a3d1e', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  📋 View Slip History
+                </button>
                 <a href="https://wa.me/2349075520182" target="_blank" rel="noopener noreferrer"
                   style={{ fontSize: 13, color: '#25D366', textDecoration: 'none', fontWeight: 600 }}>
                   💬 Encounter a challenge? Contact Support
@@ -759,6 +798,25 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+          {/* Bottom Nav */}
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0,
+          background: '#fff', borderTop: '1px solid #e8ede8',
+          display: 'flex', padding: '10px 0 20px',
+          boxShadow: '0 -4px 20px rgba(0,0,0,0.06)',
+          zIndex: 50,
+        }}>
+          <button
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3d1e', fontSize: 10, fontWeight: 700 }}>
+            <span style={{ fontSize: 20 }}>⚡</span>
+            Analyse
+          </button>
+          <button onClick={() => router.push('/history')}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
+            <span style={{ fontSize: 20 }}>📋</span>
+            History
+          </button>
+        </div>
         </main>
 
         {/* Payment Modal */}
