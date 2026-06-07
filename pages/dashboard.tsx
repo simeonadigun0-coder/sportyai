@@ -231,7 +231,7 @@ export default function Dashboard() {
   return results
 }
 
-  const handleAnalyse = async (e: React.FormEvent) => {
+ const handleAnalyse = async (e: React.FormEvent) => {
   e.preventDefault()
   if (!slip) return
 
