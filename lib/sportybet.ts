@@ -186,7 +186,105 @@ export function resolveReplacementFromMarkets(
     realOdds: outcome.odds,
   }
 }
-// Resolve replacement pick using markets already decoded from booking code
+// Complete SportyBet Nigeria market knowledge
+// Built from real booking code analysis
+export const MARKET_KNOWLEDGE: Record<string, {
+  desc: string
+  saferAlternatives: Array<{ marketId: string; marketDesc: string; outcomeId: string; outcomeDesc: string }>
+}> = {
+  // 1X2 → Double Chance
+  '1_1': { desc: 'Home Win', saferAlternatives: [{ marketId: '3', marketDesc: 'Double Chance', outcomeId: '1', outcomeDesc: 'Home/Draw' }] },
+  '1_2': { desc: 'Draw', saferAlternatives: [{ marketId: '3', marketDesc: 'Double Chance', outcomeId: '1', outcomeDesc: 'Home/Draw' }, { marketId: '3', marketDesc: 'Double Chance', outcomeId: '3', outcomeDesc: 'Draw/Away' }] },
+  '1_3': { desc: 'Away Win', saferAlternatives: [{ marketId: '3', marketDesc: 'Double Chance', outcomeId: '3', outcomeDesc: 'Draw/Away' }] },
+
+  // Over/Under — step down line
+  // outcomeId 12 = Over, 13 = Under (for market 18)
+  // Over 3.5 → Over 2.5, Over 2.5 → Over 1.5
+  '18_12_over3.5': { desc: 'Over 3.5', saferAlternatives: [{ marketId: '18', marketDesc: 'Over/Under', outcomeId: '12', outcomeDesc: 'Over 2.5' }] },
+  '18_12_over2.5': { desc: 'Over 2.5', saferAlternatives: [{ marketId: '18', marketDesc: 'Over/Under', outcomeId: '12', outcomeDesc: 'Over 1.5' }] },
+
+  // 1X2 2UP → 1UP → standard 1X2
+  '60100_1': { desc: '1X2 2UP Home', saferAlternatives: [{ marketId: '60200', marketDesc: '1X2 - 1UP', outcomeId: '1', outcomeDesc: 'Home' }] },
+  '60100_3': { desc: '1X2 2UP Away', saferAlternatives: [{ marketId: '60200', marketDesc: '1X2 - 1UP', outcomeId: '3', outcomeDesc: 'Away' }] },
+  '60200_1': { desc: '1X2 1UP Home', saferAlternatives: [{ marketId: '1', marketDesc: '1X2', outcomeId: '1', outcomeDesc: 'Home' }] },
+  '60200_3': { desc: '1X2 1UP Away', saferAlternatives: [{ marketId: '1', marketDesc: '1X2', outcomeId: '3', outcomeDesc: 'Away' }] },
+
+  // Home/Away Team Score 3+ in Row → safer alternatives
+  '60021_76': { desc: 'Home Team Score 3+ Row', saferAlternatives: [{ marketId: '60021', marketDesc: 'Home Team To Score 2 or More Goals in a Row', outcomeId: '76', outcomeDesc: 'Yes' }] },
+  '60022_76': { desc: 'Away Team Score 3+ Row', saferAlternatives: [{ marketId: '60022', marketDesc: 'Away Team To Score 2 or More Goals in a Row', outcomeId: '76', outcomeDesc: 'Yes' }] },
+  '60020_76': { desc: 'Any Team Score 3+ Row', saferAlternatives: [{ marketId: '60020', marketDesc: 'Any Team To Score 2 or More Goals in a Row', outcomeId: '76', outcomeDesc: 'Yes' }] },
+}
+
+// Get safer replacement using known market knowledge
+export function getSmartReplacement(
+  marketId: string,
+  outcomeId: string,
+  pick: string,
+  market: string,
+  originalOdds: number
+): { marketId: string; outcomeId: string; marketDesc: string; pickDesc: string } | null {
+
+  // Try exact marketId_outcomeId lookup first
+  const key = `${marketId}_${outcomeId}`
+  const known = MARKET_KNOWLEDGE[key]
+  if (known?.saferAlternatives?.length) {
+    const alt = known.saferAlternatives[0]
+    return {
+      marketId: alt.marketId,
+      outcomeId: alt.outcomeId,
+      marketDesc: alt.marketDesc,
+      pickDesc: alt.outcomeDesc,
+    }
+  }
+
+  // Fallback — use pick/market name matching
+  const m = market.toLowerCase().trim()
+  const p = pick.toLowerCase().trim()
+
+  // 1X2
+  if (m === '1x2') {
+    if (p === 'home') return { marketId: '3', outcomeId: '1', marketDesc: 'Double Chance', pickDesc: 'Home/Draw' }
+    if (p === 'away') return { marketId: '3', outcomeId: '3', marketDesc: 'Double Chance', pickDesc: 'Draw/Away' }
+    if (p === 'draw') return { marketId: '3', outcomeId: '1', marketDesc: 'Double Chance', pickDesc: 'Home/Draw' }
+  }
+
+  // Over/Under step down
+  if (m.includes('over/under') || m.includes('over under')) {
+    const num = parseFloat(p.replace(/[^0-9.]/g, ''))
+    if (p.startsWith('over') && !isNaN(num)) {
+      if (num >= 3.5) return { marketId: '18', outcomeId: '12', marketDesc: 'Over/Under', pickDesc: 'Over 2.5' }
+      if (num >= 2.5) return { marketId: '18', outcomeId: '12', marketDesc: 'Over/Under', pickDesc: 'Over 1.5' }
+      if (num >= 1.5) return { marketId: '18', outcomeId: '12', marketDesc: 'Over/Under', pickDesc: 'Over 0.5' }
+    }
+  }
+
+  // GG Yes → No
+  if ((m === 'gg/ng' || m.includes('both teams')) && p === 'yes') {
+    return { marketId: '5', outcomeId: '2', marketDesc: 'GG/NG', pickDesc: 'No' }
+  }
+
+  // 2UP → 1UP
+  if (m.includes('2up')) {
+    if (p === 'home') return { marketId: '60200', outcomeId: '1', marketDesc: '1X2 - 1UP', pickDesc: 'Home' }
+    if (p === 'away') return { marketId: '60200', outcomeId: '3', marketDesc: '1X2 - 1UP', pickDesc: 'Away' }
+  }
+
+  // 1UP → 1X2
+  if (m.includes('1up')) {
+    if (p === 'home') return { marketId: '1', outcomeId: '1', marketDesc: '1X2', pickDesc: 'Home' }
+    if (p === 'away') return { marketId: '1', outcomeId: '3', marketDesc: '1X2', pickDesc: 'Away' }
+  }
+
+  // Score 3+ in row → safer
+  if (m.includes('3 or more goals in a row')) {
+    if (m.includes('home')) return { marketId: '60021', outcomeId: '76', marketDesc: 'Home Team To Score 2 or More Goals in a Row', pickDesc: 'Yes' }
+    if (m.includes('away')) return { marketId: '60022', outcomeId: '76', marketDesc: 'Away Team To Score 2 or More Goals in a Row', pickDesc: 'Yes' }
+    return { marketId: '60020', outcomeId: '76', marketDesc: 'Any Team To Score 2 or More Goals in a Row', pickDesc: 'Yes' }
+  }
+
+  return null
+}
+
 export function resolveFromAvailableMarkets(
   availableMarkets: AvailableMarket[],
   replacedPick: string,
@@ -198,7 +296,6 @@ export function resolveFromAvailableMarkets(
   const targetMarketDesc = replacedMarket.toLowerCase().trim()
   const targetPickDesc = replacedPick.toLowerCase().trim()
 
-  // Find matching market
   const market = availableMarkets.find(m => {
     const d = m.desc.toLowerCase().trim()
     return d === targetMarketDesc ||
@@ -212,29 +309,19 @@ export function resolveFromAvailableMarkets(
 
   if (!market) return null
 
-  // Find matching outcome
   const outcome = market.outcomes.find(o => {
     const d = o.desc.toLowerCase().trim()
-
-    // Over/Under numeric match
     if (targetPickDesc.startsWith('over') || targetPickDesc.startsWith('under')) {
       const tNum = parseFloat(targetPickDesc.replace(/[^0-9.]/g, ''))
       const dNum = parseFloat(d.replace(/[^0-9.]/g, ''))
       const dir = targetPickDesc.startsWith('over') ? 'over' : 'under'
-      if (!isNaN(tNum) && !isNaN(dNum)) {
-        return d.startsWith(dir) && Math.abs(dNum - tNum) < 0.1
-      }
+      if (!isNaN(tNum) && !isNaN(dNum)) return d.startsWith(dir) && Math.abs(dNum - tNum) < 0.1
     }
-
-    // Double Chance outcomes
     if (targetPickDesc === 'home/draw') return d === 'home/draw' || d === '1x' || (d.includes('home') && d.includes('draw'))
     if (targetPickDesc === 'draw/away') return d === 'draw/away' || d === 'x2' || (d.includes('draw') && d.includes('away'))
     if (targetPickDesc === 'home/away') return d === 'home/away' || d === '12'
-
-    // GG/NG
     if (targetPickDesc === 'yes' || targetPickDesc === 'gg') return d === 'yes' || d === 'gg'
     if (targetPickDesc === 'no' || targetPickDesc === 'ng') return d === 'no' || d === 'ng'
-
     return d === targetPickDesc || d.includes(targetPickDesc) || targetPickDesc.includes(d)
   })
 
@@ -242,100 +329,5 @@ export function resolveFromAvailableMarkets(
   if (outcome.odds >= originalOdds) return null
   if (outcome.odds <= 1.02) return null
 
-  return {
-    marketId: market.id,
-    outcomeId: outcome.id,
-    realOdds: outcome.odds,
-  }
-}
-
-export async function decodeBookingCode(shareCode: string): Promise<SportyBetSlip> {
-  const cleanCode = shareCode.toUpperCase().trim()
-  const url = `https://www.sportybet.com/api/ng/orders/share/${cleanCode}?_t=${Date.now()}`
-
-  const res = await fetch(url, { headers: HEADERS })
-  if (!res.ok) throw new Error(`SportyBet API error: ${res.status}`)
-
-  const data = await res.json()
-  if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Invalid booking code')
-
-  const outcomes: unknown[] = data.data?.outcomes || []
-  const selections: unknown[] = data.data?.ticket?.selections || []
-  const displayTotalOdds = parseFloat(data.data?.ticket?.displayTotalOdds || '1')
-  const shareCodeResult = data.data?.shareCode || cleanCode
-
-  if (!outcomes.length) throw new Error('No games found in this booking code')
-
-  const games: SportyBetGame[] = outcomes.map((item: unknown, index: number) => {
-    const g = item as Record<string, unknown>
-    const sel = (selections[index] || {}) as Record<string, unknown>
-    const sport = g.sport as Record<string, unknown>
-    const sportName = (sport?.name as string) || 'Football'
-    const category = sport?.category as Record<string, unknown>
-    const tournament = category?.tournament as Record<string, unknown>
-    const league = (tournament?.name as string) || ''
-    const markets = (g.markets as unknown[]) || []
-
-    let odds = 1, pick = '', market = '1X2'
-    const marketId = String(sel.marketId || '1')
-    const outcomeId = String(sel.outcomeId || '1')
-    const specifier = (sel.specifier as string | null) || null
-
-    if (markets.length > 0) {
-      const firstMarket = markets[0] as Record<string, unknown>
-      market = (firstMarket.desc as string) || '1X2'
-      const outs = (firstMarket.outcomes as unknown[]) || []
-      const matched = outs.find((o: unknown) => {
-        const oc = o as Record<string, unknown>
-        return String(oc.id) === String(sel.outcomeId)
-      }) as Record<string, unknown> | undefined
-
-      if (matched) {
-        odds = parseFloat(String(matched.odds || 1))
-        pick = (matched.desc as string) || ''
-      } else if (outs.length > 0) {
-        const first = outs[0] as Record<string, unknown>
-        odds = parseFloat(String(first.odds || 1))
-        pick = (first.desc as string) || ''
-      }
-    }
-
-    return {
-      eventId: String(g.eventId || index),
-      homeTeam: (g.homeTeamName as string) || 'Home',
-      awayTeam: (g.awayTeamName as string) || 'Away',
-      market, marketId, outcomeId, specifier, pick, odds,
-      kickoffTime: String(g.estimateStartTime || ''),
-      league, sport: sportName,
-    }
-  })
-
-  return {
-    shareCode: shareCodeResult,
-    totalOdds: parseFloat(displayTotalOdds.toFixed(2)),
-    games,
-    raw: data,
-  }
-}
-
-export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
-  const payload = {
-    selections: games.map(g => ({
-      eventId: g.eventId,
-      marketId: g.marketId || '1',
-      specifier: g.specifier || null,
-      outcomeId: g.outcomeId || '1',
-    }))
-  }
-
-  const res = await fetch('https://www.sportybet.com/api/ng/orders/share', {
-    method: 'POST',
-    headers: HEADERS,
-    body: JSON.stringify(payload),
-  })
-
-  if (!res.ok) throw new Error(`Failed to create booking code: ${res.status}`)
-  const data = await res.json()
-  if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Failed to generate booking code')
-  return data.data?.shareCode || ''
+  return { marketId: market.id, outcomeId: outcome.id, realOdds: outcome.odds }
 }

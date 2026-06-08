@@ -1,5 +1,7 @@
 import Groq from 'groq-sdk'
-import { SportyBetGame, resolveFromAvailableMarkets } from './sportybet'
+import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement } from './sportybet'
+const PROXY_URL = 'https://sportybet-proxy.onrender.com'
+const PROXY_KEY = 'grooveslip_proxy_2026'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 const BSD_TOKEN = process.env.BSD_API_KEY || ''
@@ -447,6 +449,42 @@ function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAna
   if (bestCombo.length < 2) bestCombo = sorted.slice(sorted.length - 2)
   return bestCombo
 }
+// Fetch real odds from proxy for replaced games
+async function fetchRealOddsFromProxy(
+  games: Array<{ eventId: string; marketId: string; outcomeId: string }>
+): Promise<Map<string, number>> {
+  const oddsMap = new Map<string, number>()
+  try {
+    const payload = games.map(g => ({
+      eventId: g.eventId,
+      marketId: g.marketId,
+      outcomeId: g.outcomeId,
+      specifier: null,
+    }))
+
+    const res = await fetch(`${PROXY_URL}/outcomes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Proxy-Key': PROXY_KEY,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!res.ok) return oddsMap
+    const data = await res.json()
+    if (!data || data.bizCode !== 10000) return oddsMap
+
+    for (const ev of (data.data || [])) {
+      const market = ev.markets?.[0]
+      const outcome = market?.outcomes?.[0]
+      if (ev.eventId && outcome?.odds) {
+        oddsMap.set(ev.eventId, parseFloat(outcome.odds))
+      }
+    }
+  } catch { /* silent */ }
+  return oddsMap
+}
 
 export async function analyseSlip(
   games: SportyBetGame[],
@@ -518,20 +556,27 @@ export async function analyseSlip(
       const newPick = result.replacePick
       const newMarket = result.replaceMarket
 
-      // Try to resolve real IDs from markets already in the decode response
-      const resolved = game.availableMarkets?.length
-        ? resolveFromAvailableMarkets(
-            game.availableMarkets,
-            newPick,
-            newMarket,
-            game.odds
-          )
+      // Step 1: Try smart replacement using known market IDs
+      const smart = getSmartReplacement(
+        game.marketId,
+        game.outcomeId,
+        game.pick,
+        game.market,
+        game.odds
+      )
+
+      // Step 2: Try resolving from available markets in decode response
+      const resolved = !smart && game.availableMarkets?.length
+        ? resolveFromAvailableMarkets(game.availableMarkets, newPick, newMarket, game.odds)
         : null
 
-      const finalMarketId = resolved?.marketId || game.marketId
-      const finalOutcomeId = resolved?.outcomeId || game.outcomeId
-      const finalOdds = resolved?.realOdds || estimateSaferOdds(game.odds, game.pick, newPick, newMarket)
-      const resolvedSuccessfully = !!resolved
+      // Use smart replacement first, then resolved, then estimate
+      const finalMarketId = smart?.marketId || resolved?.marketId || game.marketId
+      const finalOutcomeId = smart?.outcomeId || resolved?.outcomeId || game.outcomeId
+      const finalPickDesc = smart?.pickDesc || newPick
+      const finalMarketDesc = smart?.marketDesc || newMarket
+      const finalOdds = resolved?.realOdds || estimateSaferOdds(game.odds, game.pick, finalPickDesc, finalMarketDesc)
+      const resolvedSuccessfully = !!(smart || resolved)
 
       return {
         ...baseResult,
@@ -540,13 +585,13 @@ export async function analyseSlip(
         originalPick: game.pick,
         originalMarket: game.market,
         originalOdds: game.odds,
-        replacedPick: newPick,
-        replacedMarketDesc: newMarket,
+        replacedPick: finalPickDesc,
+        replacedMarketDesc: finalMarketDesc,
         replacedOdds: finalOdds,
-        replacementReason: result.reason || `Safer option: ${newPick} in ${newMarket}`,
-        // Use REAL IDs if resolved, otherwise original
+        replacementReason: result.reason || `Safer option: ${finalPickDesc} in ${finalMarketDesc}`,
         marketId: finalMarketId,
         outcomeId: finalOutcomeId,
+        specifier: null,
         needsResolution: !resolvedSuccessfully,
       }
     }
@@ -575,7 +620,24 @@ export async function analyseSlip(
     const odds = g.replaced ? (g.replacedOdds || g.odds) : g.odds
     return acc * odds
   }, 1)
-
+// Fetch real odds from proxy for replaced games
+  const replacedGames = keptGames.filter(g => g.replaced)
+  if (replacedGames.length > 0) {
+    const realOddsMap = await fetchRealOddsFromProxy(
+      replacedGames.map(g => ({
+        eventId: g.eventId,
+        marketId: g.marketId,
+        outcomeId: g.outcomeId,
+      }))
+    )
+    for (const game of keptGames) {
+      if (game.replaced && realOddsMap.has(game.eventId)) {
+        game.replacedOdds = realOddsMap.get(game.eventId)!
+        game.odds = game.replacedOdds
+      }
+    }
+  }
+  const finalNewOdds = keptGames.reduce((acc, g) => acc * g.odds, 1)
   let summary = `Analysed ${games.length} games. Kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target: ${targetOdds}). Removed ${removedGames.length} picks.`
   try {
     const replacedCount = keptGames.filter(g => g.replaced).length
@@ -599,7 +661,7 @@ export async function analyseSlip(
     removedGames,
     keptGames,
     originalOdds: parseFloat(originalTotalOdds.toFixed(2)),
-    newOdds: parseFloat(newOdds.toFixed(2)),
+    newOdds: parseFloat(finalNewOdds.toFixed(2)),
     targetOdds,
     summary,
   }
