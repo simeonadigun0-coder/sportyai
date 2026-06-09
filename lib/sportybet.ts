@@ -307,12 +307,9 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
 
   console.log('[createBookingCode] selections:', JSON.stringify(selections))
 
-  // Wake the proxy first, then call /share
   try {
-    // Ping /health to wake Render from sleep (up to 8s)
     await wakeProxy(PROXY_URL, PROXY_KEY)
 
-    // Now call /share with a generous timeout
     const proxyRes = await fetch(`${PROXY_URL}/share`, {
       method: 'POST',
       headers: {
@@ -339,7 +336,6 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
     console.error('[createBookingCode] proxy exception:', err)
   }
 
-  // Fallback — direct call to SportyBet
   console.log('[createBookingCode] falling back to direct SportyBet call')
   const res = await fetch('https://www.sportybet.com/api/ng/orders/share', {
     method: 'POST',
