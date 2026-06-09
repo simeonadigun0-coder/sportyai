@@ -356,9 +356,9 @@ async function batchAnalyse(
 
   const currentSlipOdds = gameData.reduce((acc, gd) => acc * gd.game.odds, 1)
 
-  const gamesList = gameData.map((gd, i) => {
+  const gamesList = gameData.slice(0, 20).map((gd, i) => {
     const hasData = Boolean(gd.context)
-    const dataNote = hasData ? gd.context.substring(0, 300) : 'NO_STATS'
+    const dataNote = hasData ? gd.context.substring(0, 150) : 'NO_STATS'
     const oddsNote = gd.game.odds >= 4.0 ? 'VERY_HIGH_ODDS' : gd.game.odds >= 2.5 ? 'HIGH_ODDS' : gd.game.odds >= 1.8 ? 'MEDIUM_ODDS' : 'LOW_ODDS'
     return `G${i + 1}|id:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:${gd.game.pick}(${gd.game.market})|odds:${gd.game.odds}|${oddsNote}|${dataNote}`
   }).join('\n')
@@ -412,7 +412,7 @@ replacePick and replaceMarket must be actual pick and market names, or null.`
         { role: 'user', content: prompt }
       ],
       temperature: 0.1,
-      max_tokens: 4000,
+      max_tokens: 1500,
     })
 
     const raw = completion.choices[0]?.message?.content || '[]'
