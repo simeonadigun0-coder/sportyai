@@ -9,7 +9,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!user) return
 
   const { games } = req.body as { games: SportyBetGame[] }
-
   if (!games || !Array.isArray(games) || games.length === 0) {
     return res.status(400).json({ error: 'Games array is required' })
   }
@@ -19,6 +18,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ code: newCode })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to generate booking code'
-    return res.status(500).json({ error: message })
+    console.error('Rebook error:', message)
+    // Return partial success so user can see results even without booking code
+    return res.status(200).json({ 
+      code: null, 
+      error: message,
+      games: games.map(g => ({
+        match: `${g.homeTeam} vs ${g.awayTeam}`,
+        pick: g.pick,
+        market: g.market,
+        odds: g.odds,
+        marketId: g.marketId,
+        outcomeId: g.outcomeId,
+      }))
+    })
   }
 }

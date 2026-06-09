@@ -332,14 +332,47 @@ export function resolveFromAvailableMarkets(
   return { marketId: market.id, outcomeId: outcome.id, realOdds: outcome.odds }
 }
 export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
-  const payload = {
-    selections: games.map(g => ({
-      eventId: g.eventId,
-      marketId: g.marketId || '1',
-      specifier: g.specifier || null,
-      outcomeId: g.outcomeId || '1',
-    }))
-  }
+  const PROXY_URL = 'https://sportybet-proxy.onrender.com'
+  const PROXY_KEY = 'grooveslip_proxy_2026'
+
+  const selections = games.map(g => ({
+    eventId: g.eventId,
+    marketId: g.marketId || '1',
+    specifier: g.specifier || null,
+    outcomeId: g.outcomeId || '1',
+  }))
+
+  // Try via proxy first
+  try {
+    const proxyRes = await fetch(`${PROXY_URL}/share`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Proxy-Key': PROXY_KEY,
+      },
+      body: JSON.stringify({ selections }),
+    })
+
+    if (proxyRes.ok) {
+      const proxyData = await proxyRes.json()
+      if (proxyData?.bizCode === 10000 && proxyData?.data?.shareCode) {
+        return proxyData.data.shareCode
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Fallback — direct call
+  const res = await fetch('https://www.sportybet.com/api/ng/orders/share', {
+    method: 'POST',
+    headers: HEADERS,
+    body: JSON.stringify({ selections }),
+  })
+
+  if (!res.ok) throw new Error(`Failed to create booking code: ${res.status}`)
+  const data = await res.json()
+  if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Failed to generate booking code')
+  return data.data?.shareCode || ''
+}
 
   const res = await fetch('https://www.sportybet.com/api/ng/orders/share', {
     method: 'POST',
