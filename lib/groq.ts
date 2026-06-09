@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk'
 import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement } from './sportybet'
+
 const PROXY_URL = 'https://sportybet-proxy.onrender.com'
 const PROXY_KEY = 'grooveslip_proxy_2026'
 
@@ -47,6 +48,66 @@ export interface SlipAnalysis {
   targetOdds: number
   summary: string
 }
+
+// ─── HARDCODED PICK → SPORTYBET IDS MAP ────────────────────────────────────
+// Key format: "replacedPick|replacedMarket" (both lowercased)
+// This is the primary resolution method — no API, no string matching, no failures
+const PICK_TO_IDS: Record<string, { marketId: string; outcomeId: string }> = {
+  // Double Chance (marketId 3)
+  'home/draw|double chance':  { marketId: '3', outcomeId: '1' },
+  'draw/away|double chance':  { marketId: '3', outcomeId: '3' },
+  'home/away|double chance':  { marketId: '3', outcomeId: '2' },
+  '1x|double chance':         { marketId: '3', outcomeId: '1' },
+  'x2|double chance':         { marketId: '3', outcomeId: '3' },
+  '12|double chance':         { marketId: '3', outcomeId: '2' },
+
+  // GG/NG (marketId 5)
+  'yes|gg/ng':  { marketId: '5', outcomeId: '1' },
+  'no|gg/ng':   { marketId: '5', outcomeId: '2' },
+  'gg|gg/ng':   { marketId: '5', outcomeId: '1' },
+  'ng|gg/ng':   { marketId: '5', outcomeId: '2' },
+
+  // Over/Under (marketId 18 — outcomeId 12=Over, 13=Under)
+  'over 0.5|over/under':  { marketId: '18', outcomeId: '12' },
+  'over 1.5|over/under':  { marketId: '18', outcomeId: '12' },
+  'over 2.5|over/under':  { marketId: '18', outcomeId: '12' },
+  'over 3.5|over/under':  { marketId: '18', outcomeId: '12' },
+  'over 4.5|over/under':  { marketId: '18', outcomeId: '12' },
+  'under 0.5|over/under': { marketId: '18', outcomeId: '13' },
+  'under 1.5|over/under': { marketId: '18', outcomeId: '13' },
+  'under 2.5|over/under': { marketId: '18', outcomeId: '13' },
+  'under 3.5|over/under': { marketId: '18', outcomeId: '13' },
+  'under 4.5|over/under': { marketId: '18', outcomeId: '13' },
+
+  // 1X2 (marketId 1)
+  'home|1x2': { marketId: '1', outcomeId: '1' },
+  'draw|1x2': { marketId: '1', outcomeId: '2' },
+  'away|1x2': { marketId: '1', outcomeId: '3' },
+  '1|1x2':    { marketId: '1', outcomeId: '1' },
+  'x|1x2':    { marketId: '1', outcomeId: '2' },
+  '2|1x2':    { marketId: '1', outcomeId: '3' },
+
+  // 1X2 1UP (marketId 60200)
+  'home|1x2 - 1up': { marketId: '60200', outcomeId: '1' },
+  'away|1x2 - 1up': { marketId: '60200', outcomeId: '3' },
+  'home|1up':        { marketId: '60200', outcomeId: '1' },
+  'away|1up':        { marketId: '60200', outcomeId: '3' },
+
+  // 1X2 2UP (marketId 60100)
+  'home|1x2 - 2up': { marketId: '60100', outcomeId: '1' },
+  'away|1x2 - 2up': { marketId: '60100', outcomeId: '3' },
+  'home|2up':        { marketId: '60100', outcomeId: '1' },
+  'away|2up':        { marketId: '60100', outcomeId: '3' },
+}
+
+function resolvePickToIds(
+  replacedPick: string,
+  replacedMarket: string
+): { marketId: string; outcomeId: string } | null {
+  const key = `${replacedPick.toLowerCase().trim()}|${replacedMarket.toLowerCase().trim()}`
+  return PICK_TO_IDS[key] || null
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -222,7 +283,6 @@ function extractJSON(raw: string): AnalysisResult[] {
   return JSON.parse(slice)
 }
 
-// Estimate safer odds based on market type
 function estimateSaferOdds(
   originalOdds: number,
   originalPick: string,
@@ -233,47 +293,34 @@ function estimateSaferOdds(
   const np = newPick.toLowerCase()
   const nm = newMarket.toLowerCase()
 
-  // Over/Under step down
   if (nm.includes('over/under') || nm.includes('over') || nm.includes('under')) {
     const origNum = parseFloat(orig.replace(/[^0-9.]/g, ''))
     const newNum = parseFloat(np.replace(/[^0-9.]/g, ''))
     if (!isNaN(origNum) && !isNaN(newNum)) {
       const diff = origNum - newNum
-      // Each 0.5 step down roughly halves the distance to 1.0
       const factor = Math.max(0.3, 1 - (diff * 0.25))
       return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * factor).toFixed(2)))
     }
   }
-
-  // Double Chance from 1X2
   if (nm.includes('double chance')) {
     return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.4).toFixed(2)))
   }
-
-  // Draw No Bet
   if (nm.includes('draw no bet') || nm.includes('dnb')) {
     return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.6).toFixed(2)))
   }
-
-  // GG No from GG Yes
   if (nm.includes('gg') || nm.includes('both teams')) {
     return Math.max(1.05, parseFloat((originalOdds * 0.65).toFixed(2)))
   }
-
-  // Default: 50% reduction toward 1.0
   return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.5).toFixed(2)))
 }
 
-// Auto replacement rules based on market/pick/odds
 function autoReplace(game: SportyBetGame, targetOdds: number, currentSlipOdds: number): {
   replacePick: string
   replaceMarket: string
 } | null {
   const market = game.market.toLowerCase().trim()
   const pick = game.pick.toLowerCase().trim()
-  const odds = game.odds
 
-  // Over/Under - always step down if above 1.5
   if (market.includes('over/under') && !market.includes('corner')) {
     const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
     if (pick.startsWith('over') && !isNaN(num)) {
@@ -286,31 +333,18 @@ function autoReplace(game: SportyBetGame, targetOdds: number, currentSlipOdds: n
       if (num <= 1.5) return { replacePick: 'Under 2.5', replaceMarket: 'Over/Under' }
     }
   }
-
-  // 1X2 - always replace with Double Chance
   if (market === '1x2') {
-    if (pick === 'home' || pick === '1') {
-      return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
-    }
-    if (pick === 'away' || pick === '2') {
-      return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
-    }
-    if (pick === 'draw' || pick === 'x') {
-      return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
-    }
+    if (pick === 'home' || pick === '1') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
+    if (pick === 'away' || pick === '2') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
+    if (pick === 'draw' || pick === 'x') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
   }
-
-  // GG Yes - replace with No
   if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes') {
     return { replacePick: 'No', replaceMarket: 'GG/NG' }
   }
-
-  // 2UP/1UP - step down
   if (market.includes('2up') || market.includes('1up')) {
     if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
   }
-
   return null
 }
 
@@ -330,8 +364,8 @@ async function batchAnalyse(
   }).join('\n')
 
   const modeInstructions = allowSwitching
-  ? `REPLACE MODE: Analyse EVERY game and suggest a safer pick replacement where appropriate.
-  
+    ? `REPLACE MODE: Analyse EVERY game and suggest a safer pick replacement where appropriate.
+
 For EACH game:
 1. Look at the form data, H2H, injuries and odds
 2. If the pick has any risk factor, suggest a safer market alternative
@@ -340,7 +374,7 @@ For EACH game:
 REPLACEMENT RULES (apply to ALL games not just risky ones):
 - Any Over 2.5, Over 3.5, Over 4.5: replace with next lower line (Over 1.5, Over 2.5)
 - Any Away Win pick: replace with Draw/Away Double Chance
-- Any Home Win where home team is NOT strong: replace with Home/Draw Double Chance  
+- Any Home Win where home team is NOT strong: replace with Home/Draw Double Chance
 - Any Draw pick: replace with Home/Draw or Draw/Away Double Chance
 - Any GG Yes: replace with No if either team has defensive form
 - Any 1UP or 2UP market: replace with Double Chance equivalent
@@ -348,7 +382,7 @@ REPLACEMENT RULES (apply to ALL games not just risky ones):
 
 Current total odds: ${currentSlipOdds.toFixed(2)}, Target: ${targetOdds}
 Be generous with replacements - replace as many as possible to be safe.`
-  : 'REMOVE MODE: Set replacePick and replaceMarket to null for all.'
+    : 'REMOVE MODE: Set replacePick and replaceMarket to null for all.'
 
   const prompt = `You are a professional football betting analyst.
 
@@ -389,7 +423,6 @@ replacePick and replaceMarket must be actual pick and market names, or null.`
       let keep = r.keep === true
       if (gd && !gd.context && !keep) keep = true
 
-      // If in replace mode and AI didn't suggest replacement, use auto rules
       let replacePick = r.replacePick || null
       let replaceMarket = r.replaceMarket || null
 
@@ -449,7 +482,7 @@ function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAna
   if (bestCombo.length < 2) bestCombo = sorted.slice(sorted.length - 2)
   return bestCombo
 }
-// Fetch real odds from proxy for replaced games
+
 async function fetchRealOddsFromProxy(
   games: Array<{ eventId: string; marketId: string; outcomeId: string }>
 ): Promise<Map<string, number>> {
@@ -551,32 +584,35 @@ export async function analyseSlip(
       dataSource: 'FALLBACK',
     }
 
-    // Apply replacement in switching mode
+    // ─── Apply replacement in switching mode ───────────────────────────────
     if (allowSwitching && result?.replacePick && result?.replaceMarket) {
       const newPick = result.replacePick
       const newMarket = result.replaceMarket
 
-      // Step 1: Try smart replacement using known market IDs
-      const smart = getSmartReplacement(
+      // Step 1: Hardcoded lookup — primary method, no API calls, no failures
+      const hardcoded = resolvePickToIds(newPick, newMarket)
+
+      // Step 2: Smart replacement using known market ID map (fallback)
+      const smart = !hardcoded ? getSmartReplacement(
         game.marketId,
         game.outcomeId,
         game.pick,
         game.market,
         game.odds
-      )
+      ) : null
 
-      // Step 2: Try resolving from available markets in decode response
-      const resolved = !smart && game.availableMarkets?.length
+      // Step 3: availableMarkets from decode response (last resort)
+      const resolved = !hardcoded && !smart && game.availableMarkets?.length
         ? resolveFromAvailableMarkets(game.availableMarkets, newPick, newMarket, game.odds)
         : null
 
-      // Use smart replacement first, then resolved, then estimate
-      const finalMarketId = smart?.marketId || resolved?.marketId || game.marketId
-      const finalOutcomeId = smart?.outcomeId || resolved?.outcomeId || game.outcomeId
+      // Final IDs — hardcoded takes priority, guarantees correct booking code
+      const finalMarketId = hardcoded?.marketId || smart?.marketId || resolved?.marketId || game.marketId
+      const finalOutcomeId = hardcoded?.outcomeId || smart?.outcomeId || resolved?.outcomeId || game.outcomeId
       const finalPickDesc = smart?.pickDesc || newPick
       const finalMarketDesc = smart?.marketDesc || newMarket
       const finalOdds = resolved?.realOdds || estimateSaferOdds(game.odds, game.pick, finalPickDesc, finalMarketDesc)
-      const resolvedSuccessfully = !!(smart || resolved)
+      const resolvedSuccessfully = !!(hardcoded || smart || resolved)
 
       return {
         ...baseResult,
@@ -595,6 +631,7 @@ export async function analyseSlip(
         needsResolution: !resolvedSuccessfully,
       }
     }
+    // ───────────────────────────────────────────────────────────────────────
 
     return baseResult
   })
@@ -615,12 +652,12 @@ export async function analyseSlip(
   const finalGames = analysisResults.map(g => ({ ...g, keep: keptIds.has(g.eventId) }))
   const removedGames = finalGames.filter(g => !g.keep)
 
-  // Use estimated odds for replaced games in total calculation
   const newOdds = keptGames.reduce((acc, g) => {
     const odds = g.replaced ? (g.replacedOdds || g.odds) : g.odds
     return acc * odds
   }, 1)
-// Fetch real odds from proxy for replaced games
+
+  // Fetch real odds from proxy for replaced games (best-effort — won't block)
   const replacedGames = keptGames.filter(g => g.replaced)
   if (replacedGames.length > 0) {
     const realOddsMap = await fetchRealOddsFromProxy(
@@ -637,7 +674,9 @@ export async function analyseSlip(
       }
     }
   }
+
   const finalNewOdds = keptGames.reduce((acc, g) => acc * g.odds, 1)
+
   let summary = `Analysed ${games.length} games. Kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target: ${targetOdds}). Removed ${removedGames.length} picks.`
   try {
     const replacedCount = keptGames.filter(g => g.replaced).length
