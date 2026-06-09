@@ -358,7 +358,7 @@ async function batchAnalyse(
 
   const gamesList = gameData.map((gd, i) => {
     const hasData = Boolean(gd.context)
-    const dataNote = hasData ? gd.context : 'NO_STATS'
+    const dataNote = hasData ? gd.context.substring(0, 300) : 'NO_STATS'
     const oddsNote = gd.game.odds >= 4.0 ? 'VERY_HIGH_ODDS' : gd.game.odds >= 2.5 ? 'HIGH_ODDS' : gd.game.odds >= 1.8 ? 'MEDIUM_ODDS' : 'LOW_ODDS'
     return `G${i + 1}|id:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:${gd.game.pick}(${gd.game.market})|odds:${gd.game.odds}|${oddsNote}|${dataNote}`
   }).join('\n')
