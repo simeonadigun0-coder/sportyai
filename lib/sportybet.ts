@@ -373,15 +373,3 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
   if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Failed to generate booking code')
   return data.data?.shareCode || ''
 }
-
-  const res = await fetch('https://www.sportybet.com/api/ng/orders/share', {
-    method: 'POST',
-    headers: HEADERS,
-    body: JSON.stringify(payload),
-  })
-
-  if (!res.ok) throw new Error(`Failed to create booking code: ${res.status}`)
-  const data = await res.json()
-  if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Failed to generate booking code')
-  return data.data?.shareCode || ''
-}
