@@ -13,7 +13,6 @@ const bsdHeaders = {
   'Authorization': `Token ${BSD_TOKEN}`,
   'Content-Type': 'application/json',
 }
-
 const sofaHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Accept': 'application/json',
@@ -49,85 +48,67 @@ export interface SlipAnalysis {
   summary: string
 }
 
-// ─── HARDCODED PICK → SPORTYBET IDS MAP ────────────────────────────────────
-// Key format: "replacedPick|replacedMarket" (both lowercased)
-// This is the primary resolution method — no API, no string matching, no failures
+// ─── HARDCODED PICK → SPORTYBET IDS ────────────────────────────────────────
 const PICK_TO_IDS: Record<string, { marketId: string; outcomeId: string }> = {
-  // Double Chance (marketId 3)
   'home/draw|double chance':  { marketId: '3', outcomeId: '1' },
   'draw/away|double chance':  { marketId: '3', outcomeId: '3' },
   'home/away|double chance':  { marketId: '3', outcomeId: '2' },
   '1x|double chance':         { marketId: '3', outcomeId: '1' },
   'x2|double chance':         { marketId: '3', outcomeId: '3' },
   '12|double chance':         { marketId: '3', outcomeId: '2' },
-
-  // GG/NG (marketId 5)
-  'yes|gg/ng':  { marketId: '5', outcomeId: '1' },
-  'no|gg/ng':   { marketId: '5', outcomeId: '2' },
-  'gg|gg/ng':   { marketId: '5', outcomeId: '1' },
-  'ng|gg/ng':   { marketId: '5', outcomeId: '2' },
-
-  // Over/Under (marketId 18 — outcomeId 12=Over, 13=Under)
-  'over 0.5|over/under':  { marketId: '18', outcomeId: '12' },
-  'over 1.5|over/under':  { marketId: '18', outcomeId: '12' },
-  'over 2.5|over/under':  { marketId: '18', outcomeId: '12' },
-  'over 3.5|over/under':  { marketId: '18', outcomeId: '12' },
-  'over 4.5|over/under':  { marketId: '18', outcomeId: '12' },
-  'under 0.5|over/under': { marketId: '18', outcomeId: '13' },
-  'under 1.5|over/under': { marketId: '18', outcomeId: '13' },
-  'under 2.5|over/under': { marketId: '18', outcomeId: '13' },
-  'under 3.5|over/under': { marketId: '18', outcomeId: '13' },
-  'under 4.5|over/under': { marketId: '18', outcomeId: '13' },
-
-  // 1X2 (marketId 1)
-  'home|1x2': { marketId: '1', outcomeId: '1' },
-  'draw|1x2': { marketId: '1', outcomeId: '2' },
-  'away|1x2': { marketId: '1', outcomeId: '3' },
-  '1|1x2':    { marketId: '1', outcomeId: '1' },
-  'x|1x2':    { marketId: '1', outcomeId: '2' },
-  '2|1x2':    { marketId: '1', outcomeId: '3' },
-
-  // 1X2 1UP (marketId 60200)
-  'home|1x2 - 1up': { marketId: '60200', outcomeId: '1' },
-  'away|1x2 - 1up': { marketId: '60200', outcomeId: '3' },
-  'home|1up':        { marketId: '60200', outcomeId: '1' },
-  'away|1up':        { marketId: '60200', outcomeId: '3' },
-
-  // 1X2 2UP (marketId 60100)
-  'home|1x2 - 2up': { marketId: '60100', outcomeId: '1' },
-  'away|1x2 - 2up': { marketId: '60100', outcomeId: '3' },
-  'home|2up':        { marketId: '60100', outcomeId: '1' },
-  'away|2up':        { marketId: '60100', outcomeId: '3' },
+  'yes|gg/ng':                { marketId: '5', outcomeId: '1' },
+  'no|gg/ng':                 { marketId: '5', outcomeId: '2' },
+  'gg|gg/ng':                 { marketId: '5', outcomeId: '1' },
+  'ng|gg/ng':                 { marketId: '5', outcomeId: '2' },
+  'over 0.5|over/under':      { marketId: '18', outcomeId: '12' },
+  'over 1.5|over/under':      { marketId: '18', outcomeId: '12' },
+  'over 2.5|over/under':      { marketId: '18', outcomeId: '12' },
+  'over 3.5|over/under':      { marketId: '18', outcomeId: '12' },
+  'over 4.5|over/under':      { marketId: '18', outcomeId: '12' },
+  'under 0.5|over/under':     { marketId: '18', outcomeId: '13' },
+  'under 1.5|over/under':     { marketId: '18', outcomeId: '13' },
+  'under 2.5|over/under':     { marketId: '18', outcomeId: '13' },
+  'under 3.5|over/under':     { marketId: '18', outcomeId: '13' },
+  'under 4.5|over/under':     { marketId: '18', outcomeId: '13' },
+  'home|1x2':                 { marketId: '1', outcomeId: '1' },
+  'draw|1x2':                 { marketId: '1', outcomeId: '2' },
+  'away|1x2':                 { marketId: '1', outcomeId: '3' },
+  '1|1x2':                    { marketId: '1', outcomeId: '1' },
+  'x|1x2':                    { marketId: '1', outcomeId: '2' },
+  '2|1x2':                    { marketId: '1', outcomeId: '3' },
+  'home|1x2 - 1up':           { marketId: '60200', outcomeId: '1' },
+  'away|1x2 - 1up':           { marketId: '60200', outcomeId: '3' },
+  'home|1up':                 { marketId: '60200', outcomeId: '1' },
+  'away|1up':                 { marketId: '60200', outcomeId: '3' },
+  'home|1x2 - 2up':           { marketId: '60100', outcomeId: '1' },
+  'away|1x2 - 2up':           { marketId: '60100', outcomeId: '3' },
+  'home|2up':                 { marketId: '60100', outcomeId: '1' },
+  'away|2up':                 { marketId: '60100', outcomeId: '3' },
 }
 
-function resolvePickToIds(
-  replacedPick: string,
-  replacedMarket: string
-): { marketId: string; outcomeId: string } | null {
-  const key = `${replacedPick.toLowerCase().trim()}|${replacedMarket.toLowerCase().trim()}`
+function resolvePickToIds(pick: string, market: string): { marketId: string; outcomeId: string } | null {
+  const key = `${pick.toLowerCase().trim()}|${market.toLowerCase().trim()}`
   return PICK_TO_IDS[key] || null
 }
-// ───────────────────────────────────────────────────────────────────────────
 
+// ─── BSD DATA ──────────────────────────────────────────────────────────────
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
 }
-
 function teamsMatch(a: string, b: string, c: string, d: string): boolean {
   const fw = (s: string) => normalize(s).split(' ')[0]
-  const overlap = (x: string, y: string) =>
-    normalize(x).includes(fw(y)) || normalize(y).includes(fw(x))
+  const overlap = (x: string, y: string) => normalize(x).includes(fw(y)) || normalize(y).includes(fw(x))
   return overlap(a, c) && overlap(b, d)
 }
 
-async function getBSDEvent(homeTeam: string, awayTeam: string): Promise<Record<string, unknown> | null> {
-  const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
-  const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
-  for (const term of [homeTeam, homeTeam.split(' ')[0], awayTeam, awayTeam.split(' ')[0]]) {
-    try {
+async function getBSDData(homeTeam: string, awayTeam: string): Promise<string> {
+  try {
+    const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
+    const nextTwoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+    for (const term of [homeTeam, homeTeam.split(' ')[0], awayTeam]) {
       const res = await fetch(
-        `${BSD_BASE}/events/?team=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${nextTwoWeeks}&limit=50`,
-        { headers: bsdHeaders }
+        `${BSD_BASE}/events/?team=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${nextTwoWeeks}&limit=30`,
+        { headers: bsdHeaders, signal: AbortSignal.timeout(6000) }
       )
       if (!res.ok) continue
       const data = await res.json()
@@ -135,346 +116,231 @@ async function getBSDEvent(homeTeam: string, awayTeam: string): Promise<Record<s
         const ev = e as Record<string, unknown>
         return teamsMatch(ev.home_team as string || '', ev.away_team as string || '', homeTeam, awayTeam)
       })
-      if (match) {
-        const ev = match as Record<string, unknown>
-        const detail = await fetch(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders })
-        return detail.ok ? await detail.json() : ev
+      if (!match) continue
+      const ev = match as Record<string, unknown>
+      const detail = await fetch(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders, signal: AbortSignal.timeout(5000) })
+      const event = detail.ok ? await detail.json() : ev
+      const hf = event.home_form as Record<string, unknown> | null
+      const af = event.away_form as Record<string, unknown> | null
+      const h2h = event.head_to_head as Record<string, unknown> | null
+      const pred = event.prediction as Record<string, unknown> | null
+      const unavail = event.unavailable_players as Record<string, unknown> | null
+      const parts: string[] = []
+      if (hf) parts.push(`${homeTeam} form:${hf.form_string || '?'} W${hf.wins || 0}D${hf.draws || 0}L${hf.losses || 0} scored:${hf.goals_scored_last_n || 0} conceded:${hf.goals_conceded_last_n || 0}`)
+      if (af) parts.push(`${awayTeam} form:${af.form_string || '?'} W${af.wins || 0}D${af.draws || 0}L${af.losses || 0} scored:${af.goals_scored_last_n || 0} conceded:${af.goals_conceded_last_n || 0}`)
+      if (h2h) parts.push(`H2H(${h2h.total_matches || 0}): ${homeTeam} wins:${h2h.home_wins || 0} draws:${h2h.draws || 0} ${awayTeam} wins:${h2h.away_wins || 0}`)
+      if (pred) parts.push(`Prediction:${pred.predicted_result} H:${pred.prob_home_win}% D:${pred.prob_draw}% A:${pred.prob_away_win}%`)
+      if (unavail) {
+        const hi = (unavail.home as unknown[] || []).slice(0, 2).map((p: unknown) => (p as Record<string, unknown>).name).join(',')
+        const ai = (unavail.away as unknown[] || []).slice(0, 2).map((p: unknown) => (p as Record<string, unknown>).name).join(',')
+        if (hi || ai) parts.push(`Injuries H:[${hi || 'none'}] A:[${ai || 'none'}]`)
       }
-    } catch { continue }
-  }
-  return null
+      return parts.join(' | ')
+    }
+  } catch { /* silent */ }
+  return ''
 }
 
-function parseBSD(event: Record<string, unknown>, homeTeam: string, awayTeam: string): string {
-  const hf = event.home_form as Record<string, unknown> | null
-  const af = event.away_form as Record<string, unknown> | null
-  const h2h = event.head_to_head as Record<string, unknown> | null
-  const unavail = event.unavailable_players as Record<string, unknown> | null
-  const pred = event.prediction as Record<string, unknown> | null
-  const fmt = (f: Record<string, unknown> | null, name: string) =>
-    f ? `${name}:[${f.form_string || '?'}] W${f.wins || 0}D${f.draws || 0}L${f.losses || 0} scored:${f.goals_scored_last_n || 0} conceded:${f.goals_conceded_last_n || 0}`
-      : `${name}:no form data`
-  const fmtH2H = (h: Record<string, unknown> | null) =>
-    h ? `H2H(${h.total_matches || 0}): ${homeTeam} wins:${h.home_wins || 0} draws:${h.draws || 0} ${awayTeam} wins:${h.away_wins || 0}`
-      : 'H2H:no data'
-  const fmtInj = (u: Record<string, unknown> | null) => {
-    if (!u) return ''
-    const fmt2 = (arr: unknown[]) => arr.slice(0, 3).map((p: unknown) => {
-      const pl = p as Record<string, unknown>
-      return `${pl.name}(${pl.status})`
-    }).join(',')
-    const h = (u.home as unknown[] || [])
-    const a = (u.away as unknown[] || [])
-    if (!h.length && !a.length) return ''
-    return `Injuries-H:[${h.length ? fmt2(h) : 'none'}] A:[${a.length ? fmt2(a) : 'none'}]`
-  }
-  const parts = [fmt(hf, homeTeam), fmt(af, awayTeam), fmtH2H(h2h)]
-  const inj = fmtInj(unavail)
-  if (inj) parts.push(inj)
-  if (pred) parts.push(`ML:${pred.predicted_result} H:${pred.prob_home_win}% D:${pred.prob_draw}% A:${pred.prob_away_win}%`)
-  return parts.join(' | ')
-}
-
-async function getSofaTeamId(name: string): Promise<number | null> {
+async function getSofaData(homeTeam: string, awayTeam: string): Promise<string> {
   try {
-    const res = await fetch(`${SOFA_BASE}/search/teams/${encodeURIComponent(name)}`, { headers: sofaHeaders })
-    if (!res.ok) return null
-    const data = await res.json()
-    const teams: unknown[] = data.teams || []
-    if (!teams.length) return null
-    const match = teams.find((t: unknown) => {
-      const team = t as Record<string, unknown>
-      return normalize(team.name as string || '').includes(normalize(name).split(' ')[0])
-    }) as Record<string, unknown> | undefined
-    const found = (match || teams[0]) as Record<string, unknown>
-    return (found?.id as number) || null
-  } catch { return null }
-}
-
-async function getSofaForm(teamId: number, teamName: string): Promise<string> {
-  try {
-    const res = await fetch(`${SOFA_BASE}/team/${teamId}/events/last/0`, { headers: sofaHeaders })
-    if (!res.ok) return `${teamName}:no data`
-    const data = await res.json()
-    const events = ((data.events || []) as unknown[]).slice(-5)
-    if (!events.length) return `${teamName}:no recent matches`
-    let w = 0, d = 0, l = 0
-    const results = events.map((e: unknown) => {
-      const ev = e as Record<string, unknown>
-      const hs = ev.homeScore as Record<string, unknown>
-      const as_ = ev.awayScore as Record<string, unknown>
-      const ht = ev.homeTeam as Record<string, unknown>
-      const isHome = normalize(ht?.name as string || '').includes(normalize(teamName).split(' ')[0])
-      const scored = Number(isHome ? hs?.current : as_?.current) || 0
-      const conceded = Number(isHome ? as_?.current : hs?.current) || 0
-      let r = 'D'
-      if (scored > conceded) { r = 'W'; w++ }
-      else if (scored < conceded) { r = 'L'; l++ }
-      else d++
-      return `${r}${scored}-${conceded}`
-    })
-    return `${teamName} last5:W${w}D${d}L${l}[${results.join(',')}]`
-  } catch { return `${teamName}:no data` }
-}
-
-async function getSofaData(homeTeam: string, awayTeam: string): Promise<string | null> {
-  try {
-    const [homeId, awayId] = await Promise.all([getSofaTeamId(homeTeam), getSofaTeamId(awayTeam)])
-    if (!homeId && !awayId) return null
-    const [homeForm, awayForm] = await Promise.all([
-      homeId ? getSofaForm(homeId, homeTeam) : Promise.resolve(`${homeTeam}:no data`),
-      awayId ? getSofaForm(awayId, awayTeam) : Promise.resolve(`${awayTeam}:no data`),
+    const getTeamId = async (name: string): Promise<number | null> => {
+      const res = await fetch(`${SOFA_BASE}/search/teams/${encodeURIComponent(name)}`, { headers: sofaHeaders, signal: AbortSignal.timeout(5000) })
+      if (!res.ok) return null
+      const data = await res.json()
+      const teams = data.teams || []
+      if (!teams.length) return null
+      const match = teams.find((t: unknown) => normalize((t as Record<string, unknown>).name as string || '').includes(normalize(name).split(' ')[0]))
+      return ((match || teams[0]) as Record<string, unknown>)?.id as number || null
+    }
+    const getForm = async (id: number, name: string): Promise<string> => {
+      const res = await fetch(`${SOFA_BASE}/team/${id}/events/last/0`, { headers: sofaHeaders, signal: AbortSignal.timeout(5000) })
+      if (!res.ok) return ''
+      const data = await res.json()
+      const events = ((data.events || []) as unknown[]).slice(-5)
+      let w = 0, d = 0, l = 0
+      const results = events.map((e: unknown) => {
+        const ev = e as Record<string, unknown>
+        const hs = ev.homeScore as Record<string, unknown>
+        const as_ = ev.awayScore as Record<string, unknown>
+        const ht = ev.homeTeam as Record<string, unknown>
+        const isHome = normalize(ht?.name as string || '').includes(normalize(name).split(' ')[0])
+        const scored = Number(isHome ? hs?.current : as_?.current) || 0
+        const conceded = Number(isHome ? as_?.current : hs?.current) || 0
+        let r = 'D'
+        if (scored > conceded) { r = 'W'; w++ }
+        else if (scored < conceded) { r = 'L'; l++ }
+        else d++
+        return `${r}${scored}-${conceded}`
+      })
+      return `${name} last5:W${w}D${d}L${l}[${results.join(',')}]`
+    }
+    const [homeId, awayId] = await Promise.all([getTeamId(homeTeam), getTeamId(awayTeam)])
+    if (!homeId && !awayId) return ''
+    const [hForm, aForm] = await Promise.all([
+      homeId ? getForm(homeId, homeTeam) : Promise.resolve(''),
+      awayId ? getForm(awayId, awayTeam) : Promise.resolve(''),
     ])
-    return `${homeForm} | ${awayForm}`
-  } catch { return null }
+    return [hForm, aForm].filter(Boolean).join(' | ')
+  } catch { return '' }
 }
 
-async function gatherGameData(game: SportyBetGame): Promise<{
-  game: SportyBetGame
-  context: string
-  dataSource: string
-}> {
-  const isFootball = !game.sport ||
-    game.sport.toLowerCase().includes('football') ||
-    game.sport.toLowerCase().includes('soccer')
-  if (!isFootball) return { game, context: '', dataSource: 'AI_WEB_SEARCH' }
-  let context = ''
-  let dataSource = 'FALLBACK'
-  const [bsdEvent, sofaData] = await Promise.all([
-    getBSDEvent(game.homeTeam, game.awayTeam),
-    getSofaData(game.homeTeam, game.awayTeam),
-  ])
-  if (bsdEvent) {
-    context += `BSD:${parseBSD(bsdEvent, game.homeTeam, game.awayTeam)}`
-    dataSource = 'BSD'
-  }
-  if (sofaData) {
-    context += context ? ` | SOFA:${sofaData}` : `SOFA:${sofaData}`
-    dataSource = bsdEvent ? 'BSD+SOFASCORE' : 'SOFASCORE'
-  }
-  if (!context) dataSource = 'AI_WEB_SEARCH'
-  return { game, context, dataSource }
-}
-
-interface AnalysisResult {
-  eventId: string
-  confidenceScore: number
-  riskScore: number
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
-  keep: boolean
-  reason: string
-  formSummary: string
-  replacePick: string | null
-  replaceMarket: string | null
-}
-
-function extractJSON(raw: string): AnalysisResult[] {
-  try {
-    const direct = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
-    return JSON.parse(direct)
-  } catch { /* continue */ }
-  const start = raw.indexOf('[')
-  const end = raw.lastIndexOf(']')
-  if (start === -1 || end === -1) throw new Error('No JSON array found')
-  let slice = raw.substring(start, end + 1)
-  slice = slice
-    .replace(/,\s*([}\]])/g, '$1')
-    .replace(/\n/g, ' ').replace(/\r/g, '').replace(/\t/g, ' ')
-  return JSON.parse(slice)
-}
-
-function estimateSaferOdds(
-  originalOdds: number,
-  originalPick: string,
-  newPick: string,
-  newMarket: string
-): number {
-  const orig = originalPick.toLowerCase()
+// ─── ODDS ESTIMATOR ────────────────────────────────────────────────────────
+function estimateSaferOdds(originalOdds: number, newPick: string, newMarket: string): number {
   const np = newPick.toLowerCase()
   const nm = newMarket.toLowerCase()
-
-  if (nm.includes('over/under') || nm.includes('over') || nm.includes('under')) {
-    const origNum = parseFloat(orig.replace(/[^0-9.]/g, ''))
-    const newNum = parseFloat(np.replace(/[^0-9.]/g, ''))
-    if (!isNaN(origNum) && !isNaN(newNum)) {
-      const diff = origNum - newNum
-      const factor = Math.max(0.3, 1 - (diff * 0.25))
-      return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * factor).toFixed(2)))
+  if (nm.includes('over/under')) {
+    const num = parseFloat(np.replace(/[^0-9.]/g, ''))
+    if (!isNaN(num)) {
+      if (num <= 0.5) return 1.08
+      if (num <= 1.5) return Math.max(1.10, parseFloat((1 + (originalOdds - 1) * 0.25).toFixed(2)))
+      if (num <= 2.5) return Math.max(1.15, parseFloat((1 + (originalOdds - 1) * 0.45).toFixed(2)))
     }
   }
-  if (nm.includes('double chance')) {
-    return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.4).toFixed(2)))
-  }
-  if (nm.includes('draw no bet') || nm.includes('dnb')) {
-    return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.6).toFixed(2)))
-  }
-  if (nm.includes('gg') || nm.includes('both teams')) {
-    return Math.max(1.05, parseFloat((originalOdds * 0.65).toFixed(2)))
-  }
-  return Math.max(1.05, parseFloat((1 + (originalOdds - 1) * 0.5).toFixed(2)))
+  if (nm.includes('double chance')) return Math.max(1.08, parseFloat((1 + (originalOdds - 1) * 0.35).toFixed(2)))
+  if (nm.includes('gg') || nm.includes('both teams')) return Math.max(1.08, parseFloat((originalOdds * 0.6).toFixed(2)))
+  return Math.max(1.08, parseFloat((1 + (originalOdds - 1) * 0.45).toFixed(2)))
 }
 
-function autoReplace(game: SportyBetGame, targetOdds: number, currentSlipOdds: number): {
-  replacePick: string
-  replaceMarket: string
-} | null {
+// ─── FALLBACK CODE-BASED REPLACEMENT ──────────────────────────────────────
+function codeBasedReplace(game: SportyBetGame): { replacePick: string; replaceMarket: string } | null {
   const market = game.market.toLowerCase().trim()
   const pick = game.pick.toLowerCase().trim()
-
   if (market.includes('over/under') && !market.includes('corner')) {
     const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
     if (pick.startsWith('over') && !isNaN(num)) {
-      if (num >= 4.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
       if (num >= 3.5) return { replacePick: 'Over 2.5', replaceMarket: 'Over/Under' }
       if (num >= 2.5) return { replacePick: 'Over 1.5', replaceMarket: 'Over/Under' }
       if (num >= 1.5) return { replacePick: 'Over 0.5', replaceMarket: 'Over/Under' }
     }
-    if (pick.startsWith('under') && !isNaN(num)) {
-      if (num <= 1.5) return { replacePick: 'Under 2.5', replaceMarket: 'Over/Under' }
-    }
   }
-  if (market === '1x2') {
+  if (market === '1x2' || market.includes('1x2')) {
     if (pick === 'home' || pick === '1') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     if (pick === 'away' || pick === '2') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
     if (pick === 'draw' || pick === 'x') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
   }
-  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes') {
-    return { replacePick: 'No', replaceMarket: 'GG/NG' }
-  }
-  if (market.includes('2up') || market.includes('1up')) {
+  if ((market === 'gg/ng' || market.includes('gg')) && pick === 'yes') return { replacePick: 'No', replaceMarket: 'GG/NG' }
+  if (market.includes('2up')) {
     if (pick === 'home') return { replacePick: 'Home/Draw', replaceMarket: 'Double Chance' }
     if (pick === 'away') return { replacePick: 'Draw/Away', replaceMarket: 'Double Chance' }
+  }
+  if (market.includes('1up')) {
+    if (pick === 'home') return { replacePick: 'Home', replaceMarket: '1X2' }
+    if (pick === 'away') return { replacePick: 'Away', replaceMarket: '1X2' }
   }
   return null
 }
 
-async function batchAnalyse(
-  gameData: Array<{ game: SportyBetGame; context: string; dataSource: string }>,
-  targetOdds: number,
+// ─── AI ANALYSIS (per game, data-driven) ──────────────────────────────────
+interface AIDecision {
+  eventId: string
+  keep: boolean
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  riskScore: number
+  confidenceScore: number
+  reason: string
+  formSummary: string
+  replacePick: string | null
+  replaceMarket: string | null
+  replacementReason: string | null
+}
+
+async function analyseGameWithAI(
+  game: SportyBetGame,
+  bsdData: string,
+  sofaData: string,
   allowSwitching: boolean
-): Promise<Map<string, AnalysisResult>> {
+): Promise<AIDecision> {
+  const hasData = !!(bsdData || sofaData)
+  const context = [bsdData, sofaData].filter(Boolean).join(' | ')
 
-  const currentSlipOdds = gameData.reduce((acc, gd) => acc * gd.game.odds, 1)
+  // Available safer markets for this game based on current market
+  const market = game.market.toLowerCase()
+  const pick = game.pick.toLowerCase()
+  let saferOptions = ''
+  if (market === '1x2' || market.includes('1x2')) {
+    saferOptions = 'Safer options: Home/Draw (Double Chance), Draw/Away (Double Chance), Home/Away (Double Chance)'
+  } else if (market.includes('over/under')) {
+    const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
+    if (!isNaN(num) && num >= 1.5) {
+      saferOptions = `Safer options: Over ${num - 1} (Over/Under), Over ${num - 0.5} (Over/Under), Under ${num + 0.5} (Over/Under)`
+    }
+  } else if (market.includes('gg')) {
+    saferOptions = 'Safer options: No (GG/NG), Home/Draw (Double Chance)'
+  } else if (market.includes('2up')) {
+    saferOptions = 'Safer options: Home/Draw (Double Chance), Draw/Away (Double Chance), Home (1X2 - 1UP)'
+  } else if (market.includes('1up')) {
+    saferOptions = 'Safer options: Home (1X2), Away (1X2), Home/Draw (Double Chance)'
+  }
 
-  const gamesList = gameData.slice(0, 20).map((gd, i) => {
-    const hasData = Boolean(gd.context)
-    const dataNote = hasData ? gd.context.substring(0, 150) : 'NO_STATS'
-    const oddsNote = gd.game.odds >= 4.0 ? 'VERY_HIGH_ODDS' : gd.game.odds >= 2.5 ? 'HIGH_ODDS' : gd.game.odds >= 1.8 ? 'MEDIUM_ODDS' : 'LOW_ODDS'
-    return `G${i + 1}|id:${gd.game.eventId}|${gd.game.homeTeam} vs ${gd.game.awayTeam}|${gd.game.league}|pick:${gd.game.pick}(${gd.game.market})|odds:${gd.game.odds}|${oddsNote}|${dataNote}`
-  }).join('\n')
+  const prompt = `You are an expert football betting analyst for Nigerian punters. Analyse this bet and decide: keep it or replace it with a smarter, safer pick.
 
-  const modeInstructions = allowSwitching
-    ? `REPLACE MODE: Analyse EVERY game and suggest a safer pick replacement where appropriate.
+MATCH: ${game.homeTeam} vs ${game.awayTeam}
+LEAGUE: ${game.league}
+CURRENT PICK: ${game.pick} (${game.market}) @ odds ${game.odds}
+${hasData ? `STATS: ${context}` : 'STATS: No data available'}
+${saferOptions ? saferOptions : ''}
 
-For EACH game:
-1. Look at the form data, H2H, injuries and odds
-2. If the pick has any risk factor, suggest a safer market alternative
-3. You MUST suggest replacements for ALL games where a safer option exists
+RULES:
+- If stats strongly support the current pick (strong form, H2H, prediction), KEEP it even if odds are high
+- If stats are weak/against the pick OR no data, suggest the safest replacement
+- replacePick and replaceMarket must be EXACT strings from the safer options listed above, or null
+- Only replace with something genuinely safer (lower odds, higher probability)
+- If already the safest possible pick (e.g. Over 0.5, Double Chance), set replacePick to null
+- ${allowSwitching ? 'Replacement mode is ON — suggest a replacement if any doubt exists' : 'Replacement mode is OFF — set replacePick and replaceMarket to null'}
 
-REPLACEMENT RULES (apply to ALL games not just risky ones):
-- Any Over 2.5, Over 3.5, Over 4.5: replace with next lower line (Over 1.5, Over 2.5)
-- Any Away Win pick: replace with Draw/Away Double Chance
-- Any Home Win where home team is NOT strong: replace with Home/Draw Double Chance
-- Any Draw pick: replace with Home/Draw or Draw/Away Double Chance
-- Any GG Yes: replace with No if either team has defensive form
-- Any 1UP or 2UP market: replace with Double Chance equivalent
-- Only set null if pick is already the safest possible (e.g. Over 0.5, Double Chance already)
-
-Current total odds: ${currentSlipOdds.toFixed(2)}, Target: ${targetOdds}
-Be generous with replacements - replace as many as possible to be safe.`
-    : 'REMOVE MODE: Set replacePick and replaceMarket to null for all.'
-
-  const prompt = `You are a professional football betting analyst.
-
-${modeInstructions}
-
-MISSING STATS = keep the game, do not remove.
-TARGET ODDS: ${targetOdds}
-
-GAMES:
-${gamesList}
-
-Return ONLY a JSON array, one object per game in same order:
-[{"eventId":"EXACT_ID","confidenceScore":55,"riskScore":5,"riskLevel":"LOW","keep":true,"reason":"brief reason","formSummary":"key stat","replacePick":"Over 1.5","replaceMarket":"Over/Under"}]
-
-replacePick and replaceMarket must be actual pick and market names, or null.`
-
-  const map = new Map<string, AnalysisResult>()
+Return ONLY this JSON (no other text):
+{"eventId":"${game.eventId}","keep":true,"riskLevel":"LOW","riskScore":3,"confidenceScore":72,"reason":"brief reason based on stats","formSummary":"key stat in 10 words","replacePick":null,"replaceMarket":null,"replacementReason":null}`
 
   try {
     const completion = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages: [
-        {
-          role: 'system',
-          content: 'You are a JSON API. Output ONLY a valid JSON array. Start with [ end with ]. No other text.'
-        },
-        { role: 'user', content: prompt }
+        { role: 'system', content: 'You are a JSON API. Output ONLY valid JSON. No markdown, no explanation.' },
+        { role: 'user', content: prompt },
       ],
-      temperature: 0.1,
-      max_tokens: 1500,
+      temperature: 0.15,
+      max_tokens: 200,
     })
-
-    const raw = completion.choices[0]?.message?.content || '[]'
-    const results = extractJSON(raw)
-
-    for (const r of results) {
-      const gd = gameData.find(g => g.game.eventId === r.eventId)
-      let keep = r.keep === true
-      if (gd && !gd.context && !keep) keep = true
-
-      let replacePick = r.replacePick || null
-      let replaceMarket = r.replaceMarket || null
-
-      if (allowSwitching && (!replacePick || !replaceMarket) && gd) {
-        const auto = autoReplace(gd.game, targetOdds, currentSlipOdds)
-        if (auto) {
-          replacePick = auto.replacePick
-          replaceMarket = auto.replaceMarket
-        }
-      }
-
-      map.set(r.eventId, {
-        ...r,
-        keep,
-        replacePick,
-        replaceMarket,
-        riskLevel: (['LOW', 'MEDIUM', 'HIGH'].includes(r.riskLevel) ? r.riskLevel : 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',
-      })
+    const raw = completion.choices[0]?.message?.content || ''
+    const clean = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
+    const parsed = JSON.parse(clean) as AIDecision
+    return {
+      ...parsed,
+      riskLevel: (['LOW', 'MEDIUM', 'HIGH'].includes(parsed.riskLevel) ? parsed.riskLevel : 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',
+      keep: hasData ? parsed.keep : true, // never remove if no data
     }
-  } catch (err) {
-    console.error('AI analysis failed:', err)
-    for (const gd of gameData) {
-      const auto = allowSwitching ? autoReplace(gd.game, targetOdds, currentSlipOdds) : null
-      map.set(gd.game.eventId, {
-        eventId: gd.game.eventId,
-        confidenceScore: Boolean(gd.context) ? 65 : 55,
-        riskScore: 5,
-        riskLevel: 'MEDIUM',
-        reason: Boolean(gd.context) ? 'Kept based on data' : 'No stats — kept by default',
-        formSummary: gd.dataSource,
-        keep: true,
-        replacePick: auto?.replacePick || null,
-        replaceMarket: auto?.replaceMarket || null,
-      })
+  } catch {
+    // Fallback: code-based scoring
+    const odds = game.odds
+    const riskLevel = odds >= 3.5 ? 'HIGH' : odds >= 2.0 ? 'MEDIUM' : 'LOW'
+    const confidenceScore = odds >= 3.5 ? 40 : odds >= 2.0 ? 58 : 72
+    const replacement = allowSwitching ? codeBasedReplace(game) : null
+    return {
+      eventId: game.eventId,
+      keep: true,
+      riskLevel,
+      riskScore: odds >= 3.5 ? 8 : odds >= 2.0 ? 5 : 2,
+      confidenceScore,
+      reason: hasData ? 'Kept based on available data' : 'No stats — kept by default',
+      formSummary: 'Limited data',
+      replacePick: replacement?.replacePick || null,
+      replaceMarket: replacement?.replaceMarket || null,
+      replacementReason: replacement ? 'Safer alternative available' : null,
     }
   }
-
-  return map
 }
 
+// ─── FIND BEST COMBINATION ─────────────────────────────────────────────────
 function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAnalysis[] {
   if (games.length === 0) return games
-  const currentTotal = games.reduce((acc, g) =>
-    acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
+  const currentTotal = games.reduce((acc, g) => acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
   if (currentTotal <= targetOdds * 1.2) return games
   const sorted = [...games].sort((a, b) => a.confidenceScore - b.confidenceScore)
   let bestCombo = games
   let bestDiff = Math.abs(currentTotal - targetOdds)
   for (let removeCount = 1; removeCount < sorted.length - 1; removeCount++) {
     const candidate = sorted.slice(removeCount)
-    const candidateOdds = candidate.reduce((acc, g) =>
-      acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
+    const candidateOdds = candidate.reduce((acc, g) => acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
     const diff = Math.abs(candidateOdds - targetOdds)
     if (diff < bestDiff) { bestDiff = diff; bestCombo = candidate }
     if (candidateOdds < targetOdds * 0.5) break
@@ -483,42 +349,30 @@ function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAna
   return bestCombo
 }
 
+// ─── FETCH REAL ODDS FROM PROXY ────────────────────────────────────────────
 async function fetchRealOddsFromProxy(
   games: Array<{ eventId: string; marketId: string; outcomeId: string }>
 ): Promise<Map<string, number>> {
   const oddsMap = new Map<string, number>()
   try {
-    const payload = games.map(g => ({
-      eventId: g.eventId,
-      marketId: g.marketId,
-      outcomeId: g.outcomeId,
-      specifier: null,
-    }))
-
     const res = await fetch(`${PROXY_URL}/outcomes`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Proxy-Key': PROXY_KEY,
-      },
-      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
+      body: JSON.stringify(games.map(g => ({ ...g, specifier: null }))),
+      signal: AbortSignal.timeout(10000),
     })
-
     if (!res.ok) return oddsMap
     const data = await res.json()
     if (!data || data.bizCode !== 10000) return oddsMap
-
     for (const ev of (data.data || [])) {
-      const market = ev.markets?.[0]
-      const outcome = market?.outcomes?.[0]
-      if (ev.eventId && outcome?.odds) {
-        oddsMap.set(ev.eventId, parseFloat(outcome.odds))
-      }
+      const outcome = ev.markets?.[0]?.outcomes?.[0]
+      if (ev.eventId && outcome?.odds) oddsMap.set(ev.eventId, parseFloat(outcome.odds))
     }
   } catch { /* silent */ }
   return oddsMap
 }
 
+// ─── MAIN EXPORT ───────────────────────────────────────────────────────────
 export async function analyseSlip(
   games: SportyBetGame[],
   targetOdds: number,
@@ -527,92 +381,76 @@ export async function analyseSlip(
   clientMarkets: Record<string, unknown> = {}
 ): Promise<SlipAnalysis> {
 
-  const footballGames = games.filter(g =>
+  // Gather BSD + Sofascore data for all games in parallel (capped at 20 concurrent)
+  const isFootball = (g: SportyBetGame) =>
     !g.sport || g.sport.toLowerCase().includes('football') || g.sport.toLowerCase().includes('soccer')
-  )
-  const otherGames = games.filter(g =>
-    g.sport && !g.sport.toLowerCase().includes('football') && !g.sport.toLowerCase().includes('soccer')
-  )
 
-  const currentSlipOdds = games.reduce((acc, g) => acc * g.odds, 1)
-  const footballData = await Promise.all(footballGames.map(g => gatherGameData(g)))
-  const footballResults = await batchAnalyse(footballData, targetOdds, allowSwitching)
+  const dataMap = new Map<string, { bsd: string; sofa: string; dataSource: string }>()
 
-  const otherResults = new Map<string, AnalysisResult>()
-  for (const g of otherGames) {
-    const auto = allowSwitching ? autoReplace(g, targetOdds, currentSlipOdds) : null
-    otherResults.set(g.eventId, {
-      eventId: g.eventId,
-      confidenceScore: 58,
-      riskScore: 5,
-      riskLevel: 'MEDIUM',
-      reason: 'Non-football sport',
-      formSummary: 'Web search',
-      keep: true,
-      replacePick: auto?.replacePick || null,
-      replaceMarket: auto?.replaceMarket || null,
-    })
+  // Process in chunks of 10 to avoid hammering APIs
+  const footballGames = games.filter(isFootball)
+  for (let i = 0; i < footballGames.length; i += 10) {
+    const chunk = footballGames.slice(i, i + 10)
+    await Promise.all(chunk.map(async (g) => {
+      const [bsd, sofa] = await Promise.all([
+        getBSDData(g.homeTeam, g.awayTeam),
+        getSofaData(g.homeTeam, g.awayTeam),
+      ])
+      const dataSource = bsd && sofa ? 'BSD+SOFASCORE' : bsd ? 'BSD' : sofa ? 'SOFASCORE' : 'AI_WEB_SEARCH'
+      dataMap.set(g.eventId, { bsd, sofa, dataSource })
+    }))
   }
 
-  const allResults = new Map<string, AnalysisResult>()
-  footballResults.forEach((v, k) => allResults.set(k, v))
-  otherResults.forEach((v, k) => allResults.set(k, v))
+  // Analyse each game with AI (in parallel, capped at 10 concurrent)
+  const aiDecisions = new Map<string, AIDecision>()
+  for (let i = 0; i < games.length; i += 10) {
+    const chunk = games.slice(i, i + 10)
+    await Promise.all(chunk.map(async (g) => {
+      const d = dataMap.get(g.eventId) || { bsd: '', sofa: '', dataSource: 'AI_WEB_SEARCH' }
+      const decision = await analyseGameWithAI(g, d.bsd, d.sofa, allowSwitching)
+      aiDecisions.set(g.eventId, decision)
+    }))
+  }
 
-  const dataSourceMap = new Map(footballData.map(fd => [fd.game.eventId, fd.dataSource]))
-
+  // Build final analysis results
   const analysisResults: GameAnalysis[] = games.map(game => {
-    const result = allResults.get(game.eventId)
-    const dataSource = dataSourceMap.get(game.eventId) || 'AI_WEB_SEARCH'
+    const decision = aiDecisions.get(game.eventId)
+    const d = dataMap.get(game.eventId) || { bsd: '', sofa: '', dataSource: 'AI_WEB_SEARCH' }
 
-    const baseResult: GameAnalysis = result ? {
+    const baseResult: GameAnalysis = {
       ...game,
-      confidenceScore: result.confidenceScore,
-      riskScore: result.riskScore,
-      riskLevel: result.riskLevel,
-      reason: result.reason,
-      formSummary: result.formSummary,
-      keep: result.keep,
-      dataSource,
-    } : {
-      ...game,
-      confidenceScore: 55,
-      riskScore: 5,
-      riskLevel: 'MEDIUM',
-      reason: 'Kept by default',
-      formSummary: 'No data',
-      keep: true,
-      dataSource: 'FALLBACK',
+      riskLevel: decision?.riskLevel || 'MEDIUM',
+      riskScore: decision?.riskScore || 5,
+      confidenceScore: decision?.confidenceScore || 55,
+      reason: decision?.reason || 'Kept by default',
+      formSummary: decision?.formSummary || '',
+      keep: decision?.keep !== false,
+      dataSource: d.dataSource,
     }
 
-    // ─── Apply replacement in switching mode ───────────────────────────────
-    if (allowSwitching && result?.replacePick && result?.replaceMarket) {
-      const newPick = result.replacePick
-      const newMarket = result.replaceMarket
+    // Apply replacement
+    if (allowSwitching && decision?.replacePick && decision?.replaceMarket) {
+      const newPick = decision.replacePick
+      const newMarket = decision.replaceMarket
 
-      // Step 1: Hardcoded lookup — primary method, no API calls, no failures
+      // Step 1: hardcoded map (guaranteed correct IDs)
       const hardcoded = resolvePickToIds(newPick, newMarket)
 
-      // Step 2: Smart replacement using known market ID map (fallback)
+      // Step 2: smart replacement fallback
       const smart = !hardcoded ? getSmartReplacement(
-        game.marketId,
-        game.outcomeId,
-        game.pick,
-        game.market,
-        game.odds
+        game.marketId, game.outcomeId, game.pick, game.market, game.odds
       ) : null
 
-      // Step 3: availableMarkets from decode response (last resort)
+      // Step 3: availableMarkets fallback
       const resolved = !hardcoded && !smart && game.availableMarkets?.length
         ? resolveFromAvailableMarkets(game.availableMarkets, newPick, newMarket, game.odds)
         : null
 
-      // Final IDs — hardcoded takes priority, guarantees correct booking code
       const finalMarketId = hardcoded?.marketId || smart?.marketId || resolved?.marketId || game.marketId
       const finalOutcomeId = hardcoded?.outcomeId || smart?.outcomeId || resolved?.outcomeId || game.outcomeId
       const finalPickDesc = smart?.pickDesc || newPick
       const finalMarketDesc = smart?.marketDesc || newMarket
-      const finalOdds = resolved?.realOdds || estimateSaferOdds(game.odds, game.pick, finalPickDesc, finalMarketDesc)
-      const resolvedSuccessfully = !!(hardcoded || smart || resolved)
+      const finalOdds = resolved?.realOdds || estimateSaferOdds(game.odds, finalPickDesc, finalMarketDesc)
 
       return {
         ...baseResult,
@@ -624,21 +462,20 @@ export async function analyseSlip(
         replacedPick: finalPickDesc,
         replacedMarketDesc: finalMarketDesc,
         replacedOdds: finalOdds,
-        replacementReason: result.reason || `Safer option: ${finalPickDesc} in ${finalMarketDesc}`,
+        replacementReason: decision.replacementReason || `Safer option based on match data`,
         marketId: finalMarketId,
         outcomeId: finalOutcomeId,
         specifier: null,
-        needsResolution: !resolvedSuccessfully,
+        needsResolution: !(hardcoded || smart || resolved),
       }
     }
-    // ───────────────────────────────────────────────────────────────────────
 
     return baseResult
   })
 
   const aiKept = analysisResults.filter(g => g.keep)
   const aiRemoved = analysisResults.filter(g => !g.keep)
-  const keptGames = findBestCombination(aiKept, targetOdds)
+  let keptGames = findBestCombination(aiKept, targetOdds)
 
   if (keptGames.length < 2) {
     const safest = [...aiRemoved].sort((a, b) => b.confidenceScore - a.confidenceScore)
@@ -652,20 +489,11 @@ export async function analyseSlip(
   const finalGames = analysisResults.map(g => ({ ...g, keep: keptIds.has(g.eventId) }))
   const removedGames = finalGames.filter(g => !g.keep)
 
-  const newOdds = keptGames.reduce((acc, g) => {
-    const odds = g.replaced ? (g.replacedOdds || g.odds) : g.odds
-    return acc * odds
-  }, 1)
-
-  // Fetch real odds from proxy for replaced games (best-effort — won't block)
+  // Fetch real odds for replaced picks
   const replacedGames = keptGames.filter(g => g.replaced)
   if (replacedGames.length > 0) {
     const realOddsMap = await fetchRealOddsFromProxy(
-      replacedGames.map(g => ({
-        eventId: g.eventId,
-        marketId: g.marketId,
-        outcomeId: g.outcomeId,
-      }))
+      replacedGames.map(g => ({ eventId: g.eventId, marketId: g.marketId, outcomeId: g.outcomeId }))
     )
     for (const game of keptGames) {
       if (game.replaced && realOddsMap.has(game.eventId)) {
@@ -675,22 +503,21 @@ export async function analyseSlip(
     }
   }
 
-  const finalNewOdds = keptGames.reduce((acc, g) => acc * g.odds, 1)
+  const finalNewOdds = keptGames.reduce((acc, g) =>
+    acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
 
-  let summary = `Analysed ${games.length} games. Kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target: ${targetOdds}). Removed ${removedGames.length} picks.`
+  const replacedCount = keptGames.filter(g => g.replaced).length
+
+  let summary = `Analysed ${games.length} games. Kept ${keptGames.length} at ${finalNewOdds.toFixed(2)} odds (target: ${targetOdds}). Removed ${removedGames.length} risky picks${replacedCount > 0 ? `, replaced ${replacedCount} with smarter options` : ''}.`
   try {
-    const replacedCount = keptGames.filter(g => g.replaced).length
     const sc = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages: [
-        { role: 'system', content: 'Write short direct betting summaries for Nigerian punters.' },
-        {
-          role: 'user',
-          content: `2 sentences. Analysed ${games.length} games, kept ${keptGames.length} at ${newOdds.toFixed(2)} odds (target:${targetOdds}). ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with safer options.` : ''} Removed:${removedGames.map(g => `${g.homeTeam}vs${g.awayTeam}`).join(',') || 'none'}.`
-        }
+        { role: 'system', content: 'Write short direct betting summaries for Nigerian punters. 2 sentences max.' },
+        { role: 'user', content: `Analysed ${games.length} games, kept ${keptGames.length} at ${finalNewOdds.toFixed(2)} odds (target:${targetOdds}). Removed ${removedGames.length}. ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with smarter safer options based on form and H2H data.` : ''}` }
       ],
       temperature: 0.4,
-      max_tokens: 100,
+      max_tokens: 80,
     })
     summary = sc.choices[0]?.message?.content || summary
   } catch { /* use default */ }
