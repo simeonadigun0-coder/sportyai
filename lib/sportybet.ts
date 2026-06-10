@@ -295,7 +295,7 @@ async function wakeProxy(proxyUrl: string, proxyKey: string): Promise<boolean> {
 }
 
 export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
-  const PROXY_URL = 'https://sportybet-proxy.onrender.com'
+  const PROXY_URL = 'https://sportybet-proxy.grooveslip.workers.dev'
   const PROXY_KEY = 'grooveslip_proxy_2026'
 
   const selections = games.map(g => ({

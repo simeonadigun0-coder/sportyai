@@ -1,7 +1,7 @@
 import Groq from 'groq-sdk'
 import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement } from './sportybet'
 
-const PROXY_URL = 'https://sportybet-proxy.onrender.com'
+const PROXY_URL = 'https://sportybet-proxy.grooveslip.workers.dev'
 const PROXY_KEY = 'grooveslip_proxy_2026'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
