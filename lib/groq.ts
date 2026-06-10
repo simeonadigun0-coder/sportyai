@@ -603,11 +603,11 @@ export async function analyseSlip(
     const sc = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages: [
-        { role: 'system', content: 'Write casual confident betting summaries for Nigerian punters. No team names, no markdown, no asterisks, max 2 sentences.' },
-        { role: 'user', content: `Start with "Hi ${username}," then summarise: checked ${games.length} games, kept ${keptGames.length} at ${finalNewOdds.toFixed(2)} odds (target was ${targetOdds}), cut ${removedGames.length} risky ones${replacedCount > 0 ? `, swapped ${replacedCount} dodgy picks for safer options` : ''}.` }
+        { role: 'system', content: 'Write a casual 2-sentence betting summary for Nigerian punters. Start with Hi {name}. No team names, no markdown, no asterisks, no bullet points, no listing. Just high level: how many kept, odds, target, cuts made. Be punter-friendly and confident. STRICTLY 2 sentences only.' },
+        { role: 'user', content: `Write EXACTLY 2 sentences. First sentence starts with "Hi ${username}," and mentions how many games kept and the odds. Second sentence mentions cuts and swaps. No team names, no lists, no markdown. Stop after 2 sentences.\n\nFacts: ${games.length} games checked, ${keptGames.length} kept at ${finalNewOdds.toFixed(2)} odds, target was ${targetOdds}, cut ${removedGames.length}${replacedCount > 0 ? `, swapped ${replacedCount} for safer picks` : ''}.` }
       ],
       temperature: 0.5,
-      max_tokens: 100,
+      max_tokens: 80,
     })
     summary = sc.choices[0]?.message?.content || summary
   } catch { /* use default */ }
