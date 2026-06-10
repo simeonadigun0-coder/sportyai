@@ -638,6 +638,7 @@ export async function analyseSlip(
 
   // STEP 2: Fetch data only for HIGH risk games
   const riskyGames = games.filter(g => riskScores.get(g.eventId)!.riskLevel === 'HIGH' && isFootball(g))
+  console.log('[debug] total games:', games.length, '| risky:', riskyGames.length, '| allowSwitching:', allowSwitching, '| riskLevels:', games.map(g => `${g.pick}(${g.market})@${g.odds}=${riskScores.get(g.eventId)?.riskLevel}`).join(', '))
   const dataMap = new Map<string, { bsd: string; sofa: string }>()
   if (riskyGames.length > 0) {
     await Promise.all(riskyGames.map(async (g) => {
