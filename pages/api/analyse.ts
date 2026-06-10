@@ -41,10 +41,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const analysis = await analyseSlip(
-      games, targetOdds, originalTotalOdds,
-      allowSwitching || false,
-      clientMarkets || {}
-    )
+  games, targetOdds, originalTotalOdds,
+  allowSwitching || false,
+  clientMarkets || {},
+  user.username
+)
 
     // Mark free trial as used if applicable
     if (hasFreeTrialLeft) {

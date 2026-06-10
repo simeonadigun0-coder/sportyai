@@ -311,7 +311,7 @@ RULES FOR ALL GAMES:
 - confidenceScore: 40-55 if HIGH risk, 56-70 if MEDIUM, 71-85 if LOW and data supports
 - reason: must reference actual stats from the data, not generic phrases
 - formSummary: one key stat (e.g. "England W4D1L0 last 5, dominating")
-- If NO_DATA: keep=true, riskLevel based on odds only, replacePick=null unless odds > 3.0
+- If NO_DATA: keep=true, riskLevel based on odds only, BUT still suggest replacement from SAFER list if one exists (SAFER is not NONE)
 - Never remove a game if NO_DATA
 
 TARGET ODDS: ${targetOdds}
@@ -363,7 +363,7 @@ Return ONLY a valid JSON array, one object per game, same order:
       // Only replace via code if odds are genuinely high risk and safer options exist
       let replacePick: string | null = null
       let replaceMarket: string | null = null
-      if (allowSwitching && odds >= 2.5 && safer.length > 0) {
+      if (allowSwitching && safer.length > 0) {
         const [pick, market] = safer[0].split('|')
         if (resolvePickToIds(pick, market)) {
           replacePick = pick
@@ -436,7 +436,8 @@ export async function analyseSlip(
   targetOdds: number,
   originalTotalOdds: number,
   allowSwitching: boolean = false,
-  clientMarkets: Record<string, unknown> = {}
+  clientMarkets: Record<string, unknown> = {},
+  username: string = 'Champ'
 ): Promise<SlipAnalysis> {
 
   const isFootball = (g: SportyBetGame) =>
@@ -561,8 +562,8 @@ export async function analyseSlip(
     const sc = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages: [
-        { role: 'system', content: 'Write short direct betting summaries for Nigerian punters. 2 sentences max.' },
-        { role: 'user', content: `Analysed ${games.length} games, kept ${keptGames.length} at ${finalNewOdds.toFixed(2)} odds (target:${targetOdds}). Removed ${removedGames.length}. ${replacedCount > 0 ? `Replaced ${replacedCount} risky picks with smarter options based on form and H2H data.` : ''}` }
+        { role: 'system', content: 'You write betting summaries for Nigerian punters in a casual street tone. Be direct, confident, relatable. No markdown, no asterisks, no bullet points. Max 2 sentences.' },
+        { role: 'user', content: `Write a short 2-sentence betting slip summary. Start with "Hi ${username}," then give a high-level summary of what was done. Casual and confident. No team names, no markdown, no asterisks.\n\nFacts: checked ${games.length} games, kept ${keptGames.length} at ${finalNewOdds.toFixed(2)} odds (target ${targetOdds}), cut ${removedGames.length} risky picks${replacedCount > 0 ? `, swapped ${replacedCount} for safer options` : ''}.` }
       ],
       temperature: 0.4,
       max_tokens: 80,
