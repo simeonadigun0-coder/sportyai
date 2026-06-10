@@ -285,12 +285,12 @@ async function runBatchAI(
   // Build compact game lines for prompt
   // Format: G1|eventId|Home vs Away|pick(market)@odds|STATS|SAFER_OPTIONS
   const gameLines = games.map((g, i) => {
-    const d = dataMap.get(g.eventId) || { bsd: '', sofa: '' }
-    const stats = [d.bsd, d.sofa].filter(Boolean).join('|') || 'NO_DATA'
-    const safer = getSaferOptions(g.market, g.pick)
-    const saferStr = safer.length ? safer.map(s => s.split('|')[0]).join('/') : 'NONE'
-    return `G${i + 1}|${g.eventId}|${g.homeTeam} vs ${g.awayTeam}|${g.pick}(${g.market})@${g.odds}|${stats}|SAFER:${saferStr}`
-  }).join('\n')
+  const d = dataMap.get(g.eventId) || { bsd: '', sofa: '' }
+  const stats = d.bsd ? d.bsd.substring(0, 120) : d.sofa ? d.sofa.substring(0, 120) : 'NO_DATA'
+  const safer = getSaferOptions(g.market, g.pick)
+  const saferStr = safer.length ? safer.map(s => s.split('|')[0]).join('/') : 'NONE'
+  return `G${i + 1}|${g.eventId}|${g.homeTeam} vs ${g.awayTeam}|${g.pick}(${g.market})@${g.odds}|${stats}|SAFER:${saferStr}`
+}).join('\n')
 
   const replaceInstruction = allowSwitching
     ? `REPLACE MODE:
@@ -330,7 +330,7 @@ Return ONLY a valid JSON array, one object per game, same order:
         { role: 'user', content: prompt },
       ],
       temperature: 0.15,
-      max_tokens: Math.min(180 * games.length, 6000),
+      max_tokens: Math.min(120 * games.length, 3000),
     })
 
     const raw = completion.choices[0]?.message?.content || '[]'
@@ -460,7 +460,7 @@ export async function analyseSlip(
 
   // Single AI batch call — split into chunks of 25 to stay under token limit
   const aiResults = new Map<string, AIResult>()
-  const CHUNK = 25
+  const CHUNK = 10
   for (let i = 0; i < games.length; i += CHUNK) {
     const chunk = games.slice(i, i + CHUNK)
     const chunkResults = await runBatchAI(chunk, dataMap, allowSwitching, targetOdds)
