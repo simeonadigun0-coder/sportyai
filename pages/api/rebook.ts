@@ -14,8 +14,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const newCode = await createBookingCode(games)
-    return res.status(200).json({ code: newCode })
+    console.log('[rebook] selections:', JSON.stringify(games.map(g => ({
+  eventId: g.eventId,
+  marketId: g.marketId,
+  outcomeId: g.outcomeId,
+  pick: g.pick,
+  market: g.market,
+}))))
+const newCode = await createBookingCode(games)
+return res.status(200).json({ code: newCode })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to generate booking code'
     console.error('Rebook error:', message)
