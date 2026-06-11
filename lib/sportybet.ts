@@ -200,10 +200,8 @@ export function getSmartReplacement(
     const alt = known.saferAlternatives[0]
     return { marketId: alt.marketId, outcomeId: alt.outcomeId, marketDesc: alt.marketDesc, pickDesc: alt.outcomeDesc }
   }
-
   const m = market.toLowerCase().trim()
   const p = pick.toLowerCase().trim()
-
   if (m === '1x2') {
     if (p === 'home') return { marketId: '3', outcomeId: '1', marketDesc: 'Double Chance', pickDesc: 'Home/Draw' }
     if (p === 'away') return { marketId: '3', outcomeId: '3', marketDesc: 'Double Chance', pickDesc: 'Draw/Away' }
@@ -243,22 +241,17 @@ export function resolveFromAvailableMarkets(
   originalOdds: number
 ): { marketId: string; outcomeId: string; realOdds: number } | null {
   if (!availableMarkets?.length) return null
-
   const targetMarketDesc = replacedMarket.toLowerCase().trim()
   const targetPickDesc = replacedPick.toLowerCase().trim()
-
   const market = availableMarkets.find(m => {
     const d = m.desc.toLowerCase().trim()
-    return d === targetMarketDesc ||
-      d.includes(targetMarketDesc) ||
-      targetMarketDesc.includes(d) ||
+    return d === targetMarketDesc || d.includes(targetMarketDesc) || targetMarketDesc.includes(d) ||
       (targetMarketDesc.includes('double chance') && d.includes('double chance')) ||
       (targetMarketDesc.includes('draw no bet') && d.includes('draw no bet')) ||
       (targetMarketDesc === 'gg/ng' && (d.includes('gg') || d.includes('both teams'))) ||
       (targetMarketDesc.includes('over/under') && d.includes('over/under') && !d.includes('corner') && !d.includes('half'))
   })
   if (!market) return null
-
   const outcome = market.outcomes.find(o => {
     const d = o.desc.toLowerCase().trim()
     if (targetPickDesc.startsWith('over') || targetPickDesc.startsWith('under')) {
@@ -274,13 +267,13 @@ export function resolveFromAvailableMarkets(
     if (targetPickDesc === 'no' || targetPickDesc === 'ng') return d === 'no' || d === 'ng'
     return d === targetPickDesc || d.includes(targetPickDesc) || targetPickDesc.includes(d)
   })
-
   if (!outcome) return null
   if (outcome.odds >= originalOdds) return null
   if (outcome.odds <= 1.02) return null
   return { marketId: market.id, outcomeId: outcome.id, realOdds: outcome.odds }
 }
 
+// ─── WAKE PROXY ────────────────────────────────────────────────────────────
 async function wakeProxy(proxyUrl: string, proxyKey: string): Promise<boolean> {
   try {
     const res = await fetch(`${proxyUrl}/health`, {
@@ -289,43 +282,155 @@ async function wakeProxy(proxyUrl: string, proxyKey: string): Promise<boolean> {
       signal: AbortSignal.timeout(8000),
     })
     return res.ok
-  } catch {
-    return false
-  }
+  } catch { return false }
 }
 
+// ─── RESOLVE REAL IDs FROM SPORTYBET VIA CLOUDFLARE ───────────────────────
+// Fetches actual available markets from SportyBet for each event
+// and matches pick descriptions to real marketId/outcomeId combinations
+async function resolveRealSelectionsFromProxy(
+  games: SportyBetGame[],
+  proxyUrl: string,
+  proxyKey: string
+): Promise<Map<string, { marketId: string; outcomeId: string }>> {
+  const resolved = new Map<string, { marketId: string; outcomeId: string }>()
+
+  try {
+    const eventIds = games.map(g => g.eventId)
+    const res = await fetch(`${proxyUrl}/markets-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': proxyKey },
+      body: JSON.stringify({ eventIds }),
+      signal: AbortSignal.timeout(20000),
+    })
+
+    if (!res.ok) {
+      console.error('[resolveRealSelections] proxy returned:', res.status)
+      return resolved
+    }
+
+    const data = await res.json()
+    if (!data.success || !data.markets) return resolved
+
+    for (const game of games) {
+      const eventMarkets = data.markets[game.eventId]
+      if (!eventMarkets || eventMarkets.length === 0) continue
+
+      const targetMarketId = String(game.marketId)
+      const targetOutcomeId = String(game.outcomeId)
+      const pick = game.pick.toLowerCase().trim()
+      const marketDesc = game.market.toLowerCase().trim()
+
+      // Try exact ID match first
+      const exactMarket = eventMarkets.find((m: { id: string }) => String(m.id) === targetMarketId)
+      if (exactMarket) {
+        const exactOutcome = exactMarket.outcomes?.find((o: { id: string }) => String(o.id) === targetOutcomeId)
+        if (exactOutcome) {
+          resolved.set(game.eventId, { marketId: exactMarket.id, outcomeId: exactOutcome.id })
+          continue
+        }
+      }
+
+      // Try description matching
+      for (const m of eventMarkets) {
+        const md = (m.desc || '').toLowerCase()
+        const marketMatches =
+          md === marketDesc || md.includes(marketDesc) || marketDesc.includes(md) ||
+          (marketDesc.includes('double chance') && md.includes('double chance')) ||
+          (marketDesc === 'gg/ng' && (md.includes('gg') || md.includes('both teams'))) ||
+          (marketDesc.includes('over/under') && md.includes('over/under') && !md.includes('corner')) ||
+          String(m.id) === targetMarketId
+
+        if (!marketMatches) continue
+
+        for (const o of (m.outcomes || [])) {
+          const od = (o.desc || '').toLowerCase()
+          let outcomeMatches = false
+
+          if (pick.startsWith('over') || pick.startsWith('under')) {
+            const pNum = parseFloat(pick.replace(/[^0-9.]/g, ''))
+            const oNum = parseFloat(od.replace(/[^0-9.]/g, ''))
+            const dir = pick.startsWith('over') ? 'over' : 'under'
+            if (!isNaN(pNum) && !isNaN(oNum)) outcomeMatches = od.startsWith(dir) && Math.abs(oNum - pNum) < 0.1
+          } else if (pick === 'home/draw' || pick === '1x') {
+            outcomeMatches = od === 'home/draw' || od === '1x' || (od.includes('home') && od.includes('draw'))
+          } else if (pick === 'draw/away' || pick === 'x2') {
+            outcomeMatches = od === 'draw/away' || od === 'x2' || (od.includes('draw') && od.includes('away'))
+          } else if (pick === 'home/away' || pick === '12') {
+            outcomeMatches = od === 'home/away' || od === '12'
+          } else if (pick === 'home' || pick === '1') {
+            outcomeMatches = od === 'home' || od === '1' || od === 'home win'
+          } else if (pick === 'away' || pick === '2') {
+            outcomeMatches = od === 'away' || od === '2' || od === 'away win'
+          } else if (pick === 'draw' || pick === 'x') {
+            outcomeMatches = od === 'draw' || od === 'x' || od === 'the draw'
+          } else if (pick === 'yes' || pick === 'gg') {
+            outcomeMatches = od === 'yes' || od === 'gg'
+          } else if (pick === 'no' || pick === 'ng') {
+            outcomeMatches = od === 'no' || od === 'ng'
+          } else {
+            outcomeMatches = od === pick || od.includes(pick) || pick.includes(od)
+          }
+
+          if (outcomeMatches) {
+            resolved.set(game.eventId, { marketId: m.id, outcomeId: o.id })
+            break
+          }
+        }
+        if (resolved.has(game.eventId)) break
+      }
+    }
+  } catch (err) {
+    console.error('[resolveRealSelections] failed:', err)
+  }
+
+  console.log('[resolveRealSelections] resolved', resolved.size, 'of', games.length, 'games')
+  return resolved
+}
+
+// ─── CREATE BOOKING CODE ───────────────────────────────────────────────────
 export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
   const PROXY_URL = 'https://sportybet-proxy.grooveslip.workers.dev'
   const PROXY_KEY = 'grooveslip_proxy_2026'
 
   // Standard SportyBet market IDs that work for booking code creation
-// Exotic markets (450001, 900301 etc) are rejected by SportyBet's share API
-const STANDARD_MARKET_IDS = new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','28','29','30','31','32','33','34','35','36','37','38','39','40','41','42','43','44','45','46','47','48','49','50','60020','60021','60022','60100','60200','60302','547'])
+  const STANDARD_MARKET_IDS = new Set([
+    '1','2','3','4','5','6','7','8','9','10','11','12','13','14','15',
+    '16','17','18','19','20','21','22','23','24','25','26','27','28',
+    '29','30','31','32','33','34','35','36','37','38','39','40','41',
+    '42','43','44','45','46','47','48','49','50',
+    '60020','60021','60022','60100','60200','60302','547'
+  ])
 
-const selections = games
-  .filter(g => STANDARD_MARKET_IDS.has(String(g.marketId)))
-  .map(g => ({
-    eventId: g.eventId,
-    marketId: g.marketId || '1',
-    specifier: g.specifier || null,
-    outcomeId: g.outcomeId || '1',
-  }))
+  const standardGames = games.filter(g => STANDARD_MARKET_IDS.has(String(g.marketId)))
+  console.log('[createBookingCode] total:', games.length, '| standard:', standardGames.length, '| exotic filtered:', games.length - standardGames.length)
 
-if (selections.length === 0) throw new Error('No standard markets available for booking code')
+  if (standardGames.length === 0) throw new Error('No standard markets available for booking code')
 
-console.log('[createBookingCode] total games:', games.length, '| standard markets:', selections.length, '| filtered out:', games.length - selections.length)
+  // Wake proxy (Cloudflare Workers — instant, no cold start)
+  await wakeProxy(PROXY_URL, PROXY_KEY)
 
-  console.log('[createBookingCode] selections:', JSON.stringify(selections))
+  // Fetch real IDs from SportyBet via Cloudflare Worker
+  const realIds = await resolveRealSelectionsFromProxy(standardGames, PROXY_URL, PROXY_KEY)
 
+  // Build final selections — use real IDs from SportyBet where available
+  const selections = standardGames.map(g => {
+    const real = realIds.get(g.eventId)
+    return {
+      eventId: g.eventId,
+      marketId: real ? real.marketId : g.marketId || '1',
+      specifier: g.specifier || null,
+      outcomeId: real ? real.outcomeId : g.outcomeId || '1',
+    }
+  })
+
+  console.log('[createBookingCode] sending', selections.length, 'selections to proxy')
+
+  // Try proxy /share
   try {
-    await wakeProxy(PROXY_URL, PROXY_KEY)
-
     const proxyRes = await fetch(`${PROXY_URL}/share`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Proxy-Key': PROXY_KEY,
-      },
+      headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
       body: JSON.stringify({ selections }),
       signal: AbortSignal.timeout(25000),
     })
@@ -334,25 +439,48 @@ console.log('[createBookingCode] total games:', games.length, '| standard market
 
     if (proxyRes.ok) {
       const proxyData = await proxyRes.json()
-      console.log('[createBookingCode] proxy response:', JSON.stringify(proxyData))
+      console.log('[createBookingCode] bizCode:', proxyData?.bizCode)
+
       if (proxyData?.bizCode === 10000 && proxyData?.data?.shareCode) {
         return proxyData.data.shareCode
       }
-    } else {
-      const errText = await proxyRes.text()
-      console.error('[createBookingCode] proxy error body:', errText)
+
+      // bizCode 19000 = one or more events expired/not found
+      // Retry removing events one by one until it works
+      if (proxyData?.bizCode === 19000) {
+        console.log('[createBookingCode] bizCode 19000 — removing expired events one by one')
+        for (let i = 0; i < selections.length; i++) {
+          const reduced = selections.filter((_, idx) => idx !== i)
+          if (reduced.length === 0) continue
+          try {
+            const retryRes = await fetch(`${PROXY_URL}/share`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
+              body: JSON.stringify({ selections: reduced }),
+              signal: AbortSignal.timeout(10000),
+            })
+            if (retryRes.ok) {
+              const retryData = await retryRes.json()
+              if (retryData?.bizCode === 10000 && retryData?.data?.shareCode) {
+                console.log('[createBookingCode] success after removing index', i, '—', standardGames[i]?.homeTeam, 'vs', standardGames[i]?.awayTeam)
+                return retryData.data.shareCode
+              }
+            }
+          } catch { continue }
+        }
+      }
     }
   } catch (err) {
     console.error('[createBookingCode] proxy exception:', err)
   }
 
+  // Fallback — direct SportyBet call
   console.log('[createBookingCode] falling back to direct SportyBet call')
   const res = await fetch('https://www.sportybet.com/api/ng/orders/share', {
     method: 'POST',
     headers: HEADERS,
     body: JSON.stringify({ selections }),
   })
-
   if (!res.ok) throw new Error(`Failed to create booking code: ${res.status}`)
   const data = await res.json()
   if (!data || data.bizCode !== 10000) throw new Error(data?.message || 'Failed to generate booking code')
