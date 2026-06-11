@@ -298,12 +298,22 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
   const PROXY_URL = 'https://sportybet-proxy.grooveslip.workers.dev'
   const PROXY_KEY = 'grooveslip_proxy_2026'
 
-  const selections = games.map(g => ({
+  // Standard SportyBet market IDs that work for booking code creation
+// Exotic markets (450001, 900301 etc) are rejected by SportyBet's share API
+const STANDARD_MARKET_IDS = new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','28','29','30','31','32','33','34','35','36','37','38','39','40','41','42','43','44','45','46','47','48','49','50','60020','60021','60022','60100','60200','60302','547'])
+
+const selections = games
+  .filter(g => STANDARD_MARKET_IDS.has(String(g.marketId)))
+  .map(g => ({
     eventId: g.eventId,
     marketId: g.marketId || '1',
     specifier: g.specifier || null,
     outcomeId: g.outcomeId || '1',
   }))
+
+if (selections.length === 0) throw new Error('No standard markets available for booking code')
+
+console.log('[createBookingCode] total games:', games.length, '| standard markets:', selections.length, '| filtered out:', games.length - selections.length)
 
   console.log('[createBookingCode] selections:', JSON.stringify(selections))
 
