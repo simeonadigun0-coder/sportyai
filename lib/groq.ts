@@ -316,14 +316,14 @@ function noDataDecision(
     }
   }
 
-  // Away win at high odds without data
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'away' || pick === '2') && odds >= 2.0) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 36, reason: `Away win at ${odds} odds — risky without data`, suggestedPick: 'Draw/Away', suggestedMarket: 'Double Chance' }
+  // Away win without data — always replace/remove (away wins are inherently risky without data)
+  if ((market === '1x2' || market.includes('1x2')) && (pick === 'away' || pick === '2')) {
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Away win at ${odds} odds with no data — too risky to keep`, suggestedPick: 'Draw/Away', suggestedMarket: 'Double Chance' }
   }
 
-  // Home win at high odds without data
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds >= 2.5) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Home win at ${odds} odds — risky without data`, suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
+  // Home win at any meaningful odds without data
+  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds >= 2.0) {
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Home win at ${odds} odds with no data — risky without supporting stats`, suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
   }
 
   // GG Yes without data
@@ -335,10 +335,18 @@ function noDataDecision(
   if (odds >= 4.0) return { decision: 'remove', confidence: 28, reason: `Odds of ${odds} are very high risk without any supporting data` }
   if (odds >= 2.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `${odds} odds is significant risk without data` }
 
-  // Low odds, relatively safe market — keep
-  if (odds <= 1.4) return { decision: 'keep', confidence: 65, reason: `Low odds of ${odds} — reasonably safe even without data` }
+  // Low odds home win — keep
+  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds <= 1.5) {
+    return { decision: 'keep', confidence: 62, reason: `Home favourite at ${odds} odds — reasonable without data` }
+  }
 
-  return { decision: 'keep', confidence: 55, reason: `No data available — kept based on acceptable odds (${odds})` }
+  // Very low odds any market — keep
+  if (odds <= 1.2) return { decision: 'keep', confidence: 65, reason: `Very low odds of ${odds} — safe enough without data` }
+
+  // Everything else with no data and meaningful odds — replace or remove
+  if (odds >= 1.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 40, reason: `No data available — ${odds} odds is too risky to keep without supporting stats`, suggestedPick: market.includes('over') ? 'Over 0.5' : 'Home/Draw', suggestedMarket: market.includes('over') ? 'Over/Under' : 'Double Chance' }
+
+  return { decision: 'keep', confidence: 58, reason: `Low odds of ${odds} — keeping without data` }
 }
 
 // ─── SMART PRE-FILTER (with data) ─────────────────────────────────────────
