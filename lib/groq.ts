@@ -1,6 +1,6 @@
 import Groq from 'groq-sdk'
 import Anthropic from '@anthropic-ai/sdk'
-import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement } from './sportybet'
+import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement, findSafestPickFromMarkets } from './sportybet'
 import { sendAdminAlert } from './email'
 import { Redis } from '@upstash/redis'
 
@@ -316,14 +316,14 @@ function noDataDecision(
     }
   }
 
-  // Away win without data — always replace/remove (away wins are inherently risky without data)
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'away' || pick === '2')) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Away win at ${odds} odds with no data — too risky to keep`, suggestedPick: 'Draw/Away', suggestedMarket: 'Double Chance' }
+  // Away win at high odds without data
+  if ((market === '1x2' || market.includes('1x2')) && (pick === 'away' || pick === '2') && odds >= 2.0) {
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 36, reason: `Away win at ${odds} odds — risky without data`, suggestedPick: 'Draw/Away', suggestedMarket: 'Double Chance' }
   }
 
-  // Home win at any meaningful odds without data
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds >= 2.0) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Home win at ${odds} odds with no data — risky without supporting stats`, suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
+  // Home win at high odds without data
+  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds >= 2.5) {
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Home win at ${odds} odds — risky without data`, suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
   }
 
   // GG Yes without data
@@ -335,18 +335,10 @@ function noDataDecision(
   if (odds >= 4.0) return { decision: 'remove', confidence: 28, reason: `Odds of ${odds} are very high risk without any supporting data` }
   if (odds >= 2.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `${odds} odds is significant risk without data` }
 
-  // Low odds home win — keep
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds <= 1.5) {
-    return { decision: 'keep', confidence: 62, reason: `Home favourite at ${odds} odds — reasonable without data` }
-  }
+  // Low odds, relatively safe market — keep
+  if (odds <= 1.4) return { decision: 'keep', confidence: 65, reason: `Low odds of ${odds} — reasonably safe even without data` }
 
-  // Very low odds any market — keep
-  if (odds <= 1.2) return { decision: 'keep', confidence: 65, reason: `Very low odds of ${odds} — safe enough without data` }
-
-  // Everything else with no data and meaningful odds — replace or remove
-  if (odds >= 1.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 40, reason: `No data available — ${odds} odds is too risky to keep without supporting stats`, suggestedPick: market.includes('over') ? 'Over 0.5' : 'Home/Draw', suggestedMarket: market.includes('over') ? 'Over/Under' : 'Double Chance' }
-
-  return { decision: 'keep', confidence: 58, reason: `Low odds of ${odds} — keeping without data` }
+  return { decision: 'keep', confidence: 55, reason: `No data available — kept based on acceptable odds (${odds})` }
 }
 
 // ─── SMART PRE-FILTER (with data) ─────────────────────────────────────────
@@ -857,13 +849,34 @@ export async function analyseSlip(
     }
 
     if (allowSwitching && finalReplacement && finalKeep) {
-      const ids = hardcodedIds(finalReplacement.pick, finalReplacement.market) ||
+      // Step 1: Use findSafestPickFromMarkets — scans ALL real SportyBet markets
+      // from the decode response to find the genuinely safest available pick
+      // This uses real IDs from SportyBet, not hardcoded guesses
+      const safest = game.availableMarkets?.length
+        ? findSafestPickFromMarkets(game.availableMarkets, game.marketId, game.outcomeId, game.odds)
+        : null
+
+      // Step 2: If safest found from real markets, use it — override AI suggestion
+      // Real SportyBet data beats our hardcoded logic every time
+      const finalPick = safest?.pick || finalReplacement.pick
+      const finalMarket = safest?.market || finalReplacement.market
+      const finalMarketId = safest?.marketId || null
+      const finalOutcomeId = safest?.outcomeId || null
+      const finalOdds = safest?.odds || estimateSaferOdds(game.odds, finalPick, finalMarket)
+
+      // Step 3: If no real market data, fall back to hardcoded IDs
+      const fallbackIds = !finalMarketId ? (
+        hardcodedIds(finalPick, finalMarket) ||
         getSmartReplacement(game.marketId, game.outcomeId, game.pick, game.market, game.odds) ||
         (game.availableMarkets?.length
-          ? (() => { const r = resolveFromAvailableMarkets(game.availableMarkets!, finalReplacement!.pick, finalReplacement!.market, game.odds); return r ? { marketId: r.marketId, outcomeId: r.outcomeId } : null })()
+          ? (() => { const r = resolveFromAvailableMarkets(game.availableMarkets!, finalPick, finalMarket, game.odds); return r ? { marketId: r.marketId, outcomeId: r.outcomeId } : null })()
           : null)
+      ) : null
 
-      if (ids) {
+      const resolvedMarketId = finalMarketId || fallbackIds?.marketId
+      const resolvedOutcomeId = finalOutcomeId || fallbackIds?.outcomeId
+
+      if (resolvedMarketId && resolvedOutcomeId) {
         return {
           ...base,
           keep: true,
@@ -871,12 +884,14 @@ export async function analyseSlip(
           originalPick: game.pick,
           originalMarket: game.market,
           originalOdds: game.odds,
-          replacedPick: finalReplacement.pick,
-          replacedMarketDesc: finalReplacement.market,
-          replacedOdds: estimateSaferOdds(game.odds, finalReplacement.pick, finalReplacement.market),
-          replacementReason: finalReplacement.reason,
-          marketId: ids.marketId,
-          outcomeId: ids.outcomeId,
+          replacedPick: finalPick,
+          replacedMarketDesc: finalMarket,
+          replacedOdds: finalOdds,
+          replacementReason: safest
+            ? `Safest available pick: ${finalPick} (${finalMarket}) @ ${finalOdds} — from ${game.homeTeam} vs ${game.awayTeam} real markets`
+            : finalReplacement.reason,
+          marketId: resolvedMarketId,
+          outcomeId: resolvedOutcomeId,
           specifier: null,
           needsResolution: false,
         }
@@ -894,17 +909,14 @@ export async function analyseSlip(
     for (const g of safest) { if (keptGames.length >= 2) break; keptGames.push(g) }
   }
 
-  // PHASE 5: Resolve real IDs + real odds from Cloudflare proxy
+  // PHASE 5: IDs already resolved from availableMarkets during analysis
+  // Real odds already set from findSafestPickFromMarkets
+  // This phase is kept as a no-op for future proxy-based enhancement
   const replacedGames = keptGames.filter(g => g.replaced)
   if (replacedGames.length > 0) {
-    await Promise.all(replacedGames.map(async (g) => {
-      const real = await resolveRealIdsFromProxy(g.eventId, g.replacedPick!, g.replacedMarketDesc!)
-      if (real) {
-        g.marketId = real.marketId
-        g.outcomeId = real.outcomeId
-        g.replacedOdds = real.realOdds
-        g.odds = real.realOdds
-      }
+    await Promise.all(replacedGames.map(async () => {
+      // IDs already correct from Phase 4 using availableMarkets
+      // No additional proxy call needed
     }))
   }
 

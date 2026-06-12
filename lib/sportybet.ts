@@ -69,17 +69,14 @@ export async function fetchEventMarkets(game: SportyBetGame): Promise<EventMarke
       outcomeId: '1',
       specifier: null,
     }))
-
     const res = await fetch('https://www.sportybet.com/api/ng/factsCenter/Outcomes', {
       method: 'POST',
       headers: HEADERS,
       body: JSON.stringify(payload),
     })
-
     if (!res.ok) return null
     const data = await res.json()
     if (!data || data.bizCode !== 10000) return null
-
     const allMarketsMap = new Map<string, Market>()
     for (const eventData of (data.data || []) as unknown[]) {
       const ev = eventData as Record<string, unknown>
@@ -112,7 +109,6 @@ export async function fetchEventMarkets(game: SportyBetGame): Promise<EventMarke
         }
       }
     }
-
     return {
       eventId: game.eventId,
       homeTeam: game.homeTeam,
@@ -122,69 +118,97 @@ export async function fetchEventMarkets(game: SportyBetGame): Promise<EventMarke
   } catch { return null }
 }
 
-function matchMarket(markets: Market[], targetDesc: string): Market | null {
-  const t = targetDesc.toLowerCase().trim()
-  return markets.find(m => {
-    const d = m.desc.toLowerCase().trim()
-    return d === t || d.includes(t) || t.includes(d) ||
-      (t.includes('double chance') && d.includes('double chance')) ||
-      (t.includes('draw no bet') && (d.includes('draw no bet') || d.includes('dnb'))) ||
-      (t === 'gg/ng' && (d.includes('gg') || d.includes('both teams to score'))) ||
-      (t.includes('over/under') && d.includes('over/under') && !d.includes('corner') && !d.includes('half'))
-  }) || null
-}
+// ─── FIND SAFEST PICK FROM AVAILABLE MARKETS ──────────────────────────────
+// Scans all real SportyBet markets for a game and returns the safest pick
+// "Safest" = lowest odds above 1.05 (most likely to win)
+// This replaces hardcoded replacement options entirely
+export function findSafestPickFromMarkets(
+  availableMarkets: AvailableMarket[],
+  currentMarketId: string,
+  currentOutcomeId: string,
+  currentOdds: number
+): { marketId: string; outcomeId: string; pick: string; market: string; odds: number } | null {
+  if (!availableMarkets?.length) return null
 
-function matchOutcome(market: Market, targetPick: string): MarketOutcome | null {
-  const t = targetPick.toLowerCase().trim()
-  return market.outcomes.find(o => {
-    const d = o.desc.toLowerCase().trim()
-    if ((t.startsWith('over') || t.startsWith('under'))) {
-      const tNum = parseFloat(t.replace(/[^0-9.]/g, ''))
-      const dNum = parseFloat(d.replace(/[^0-9.]/g, ''))
-      const dir = t.startsWith('over') ? 'over' : 'under'
-      if (!isNaN(tNum) && !isNaN(dNum)) {
-        return d.startsWith(dir) && Math.abs(dNum - tNum) < 0.1
+  // Priority markets — these are the safest market types
+  // Order matters — we prefer Double Chance > Over 0.5 > 1X2 > GG/NG > others
+  const SAFE_MARKET_KEYWORDS = [
+    'double chance',
+    'over/under',
+    '1x2',
+    'gg/ng',
+    'both teams',
+    'draw no bet',
+  ]
+
+  // Collect ALL valid outcomes across all markets
+  interface Candidate {
+    marketId: string
+    outcomeId: string
+    pick: string
+    market: string
+    odds: number
+    priority: number
+  }
+  const candidates: Candidate[] = []
+
+  for (const m of availableMarkets) {
+    const mDesc = m.desc.toLowerCase()
+
+    // Skip corner, booking, half-time markets — too risky
+    if (mDesc.includes('corner') || mDesc.includes('booking') ||
+        mDesc.includes('card') || mDesc.includes('offside') ||
+        mDesc.includes('penalty') || mDesc.includes('minute')) continue
+
+    // Skip the current market+outcome — we want something different
+    const isCurrent = m.id === currentMarketId
+
+    // Calculate priority based on market type
+    let priority = 99
+    for (let i = 0; i < SAFE_MARKET_KEYWORDS.length; i++) {
+      if (mDesc.includes(SAFE_MARKET_KEYWORDS[i])) {
+        priority = i
+        break
       }
     }
-    if (t === 'home/draw' || t === '1x') return d === 'home/draw' || d === '1x' || d === 'home or draw'
-    if (t === 'draw/away' || t === 'x2') return d === 'draw/away' || d === 'x2' || d === 'draw or away'
-    if (t === 'home/away' || t === '12') return d === 'home/away' || d === '12' || d === 'home or away'
-    return d === t || d.includes(t) || t.includes(d)
-  }) || null
-}
 
-export function resolveReplacementFromMarkets(
-  markets: Market[],
-  replacedPick: string,
-  replacedMarket: string,
-  originalOdds: number
-): { marketId: string; outcomeId: string; realOdds: number } | null {
-  const market = matchMarket(markets, replacedMarket)
-  if (!market) return null
-  const outcome = matchOutcome(market, replacedPick)
-  if (!outcome) return null
-  if (!outcome.isActive) return null
-  if (outcome.odds >= originalOdds) return null
-  if (outcome.odds <= 1.02) return null
-  return { marketId: market.id, outcomeId: outcome.id, realOdds: outcome.odds }
-}
+    for (const o of m.outcomes) {
+      // Skip current pick
+      if (isCurrent && o.id === currentOutcomeId) continue
 
-export const MARKET_KNOWLEDGE: Record<string, {
-  desc: string
-  saferAlternatives: Array<{ marketId: string; marketDesc: string; outcomeId: string; outcomeDesc: string }>
-}> = {
-  '1_1': { desc: 'Home Win', saferAlternatives: [{ marketId: '3', marketDesc: 'Double Chance', outcomeId: '1', outcomeDesc: 'Home/Draw' }] },
-  '1_2': { desc: 'Draw', saferAlternatives: [{ marketId: '3', marketDesc: 'Double Chance', outcomeId: '1', outcomeDesc: 'Home/Draw' }, { marketId: '3', marketDesc: 'Double Chance', outcomeId: '3', outcomeDesc: 'Draw/Away' }] },
-  '1_3': { desc: 'Away Win', saferAlternatives: [{ marketId: '3', marketDesc: 'Double Chance', outcomeId: '3', outcomeDesc: 'Draw/Away' }] },
-  '18_12_over3.5': { desc: 'Over 3.5', saferAlternatives: [{ marketId: '18', marketDesc: 'Over/Under', outcomeId: '12', outcomeDesc: 'Over 2.5' }] },
-  '18_12_over2.5': { desc: 'Over 2.5', saferAlternatives: [{ marketId: '18', marketDesc: 'Over/Under', outcomeId: '12', outcomeDesc: 'Over 1.5' }] },
-  '60100_1': { desc: '1X2 2UP Home', saferAlternatives: [{ marketId: '60200', marketDesc: '1X2 - 1UP', outcomeId: '1', outcomeDesc: 'Home' }] },
-  '60100_3': { desc: '1X2 2UP Away', saferAlternatives: [{ marketId: '60200', marketDesc: '1X2 - 1UP', outcomeId: '3', outcomeDesc: 'Away' }] },
-  '60200_1': { desc: '1X2 1UP Home', saferAlternatives: [{ marketId: '1', marketDesc: '1X2', outcomeId: '1', outcomeDesc: 'Home' }] },
-  '60200_3': { desc: '1X2 1UP Away', saferAlternatives: [{ marketId: '1', marketDesc: '1X2', outcomeId: '3', outcomeDesc: 'Away' }] },
-  '60021_76': { desc: 'Home Team Score 3+ Row', saferAlternatives: [{ marketId: '60021', marketDesc: 'Home Team To Score 2 or More Goals in a Row', outcomeId: '76', outcomeDesc: 'Yes' }] },
-  '60022_76': { desc: 'Away Team Score 3+ Row', saferAlternatives: [{ marketId: '60022', marketDesc: 'Away Team To Score 2 or More Goals in a Row', outcomeId: '76', outcomeDesc: 'Yes' }] },
-  '60020_76': { desc: 'Any Team Score 3+ Row', saferAlternatives: [{ marketId: '60020', marketDesc: 'Any Team To Score 2 or More Goals in a Row', outcomeId: '76', outcomeDesc: 'Yes' }] },
+      // Must be genuinely safer than current
+      if (o.odds >= currentOdds) continue
+
+      // Must be above minimum viable odds
+      if (o.odds <= 1.03) continue
+
+      // Skip very risky Over lines
+      const oDesc = o.desc.toLowerCase()
+      if (oDesc.startsWith('over')) {
+        const num = parseFloat(oDesc.replace(/[^0-9.]/g, ''))
+        if (!isNaN(num) && num >= 2.5) continue // Skip Over 2.5+ as replacement
+      }
+
+      candidates.push({
+        marketId: m.id,
+        outcomeId: o.id,
+        pick: o.desc,
+        market: m.desc,
+        odds: o.odds,
+        priority,
+      })
+    }
+  }
+
+  if (candidates.length === 0) return null
+
+  // Sort by: priority first (safer market type), then by odds ascending (safest pick)
+  candidates.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority
+    return a.odds - b.odds
+  })
+
+  return candidates[0]
 }
 
 export function getSmartReplacement(
@@ -194,12 +218,6 @@ export function getSmartReplacement(
   market: string,
   originalOdds: number
 ): { marketId: string; outcomeId: string; marketDesc: string; pickDesc: string } | null {
-  const key = `${marketId}_${outcomeId}`
-  const known = MARKET_KNOWLEDGE[key]
-  if (known?.saferAlternatives?.length) {
-    const alt = known.saferAlternatives[0]
-    return { marketId: alt.marketId, outcomeId: alt.outcomeId, marketDesc: alt.marketDesc, pickDesc: alt.outcomeDesc }
-  }
   const m = market.toLowerCase().trim()
   const p = pick.toLowerCase().trim()
   if (m === '1x2') {
@@ -225,11 +243,6 @@ export function getSmartReplacement(
   if (m.includes('1up')) {
     if (p === 'home') return { marketId: '1', outcomeId: '1', marketDesc: '1X2', pickDesc: 'Home' }
     if (p === 'away') return { marketId: '1', outcomeId: '3', marketDesc: '1X2', pickDesc: 'Away' }
-  }
-  if (m.includes('3 or more goals in a row')) {
-    if (m.includes('home')) return { marketId: '60021', outcomeId: '76', marketDesc: 'Home Team To Score 2 or More Goals in a Row', pickDesc: 'Yes' }
-    if (m.includes('away')) return { marketId: '60022', outcomeId: '76', marketDesc: 'Away Team To Score 2 or More Goals in a Row', pickDesc: 'Yes' }
-    return { marketId: '60020', outcomeId: '76', marketDesc: 'Any Team To Score 2 or More Goals in a Row', pickDesc: 'Yes' }
   }
   return null
 }
@@ -273,119 +286,75 @@ export function resolveFromAvailableMarkets(
   return { marketId: market.id, outcomeId: outcome.id, realOdds: outcome.odds }
 }
 
-// ─── WAKE PROXY ────────────────────────────────────────────────────────────
-async function wakeProxy(proxyUrl: string, proxyKey: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${proxyUrl}/health`, {
-      method: 'GET',
-      headers: { 'X-Proxy-Key': proxyKey },
-      signal: AbortSignal.timeout(8000),
-    })
-    return res.ok
-  } catch { return false }
-}
-
-// ─── RESOLVE REAL IDs FROM SPORTYBET VIA CLOUDFLARE ───────────────────────
-// Fetches actual available markets from SportyBet for each event
-// and matches pick descriptions to real marketId/outcomeId combinations
-async function resolveRealSelectionsFromProxy(
-  games: SportyBetGame[],
-  proxyUrl: string,
-  proxyKey: string
-): Promise<Map<string, { marketId: string; outcomeId: string }>> {
-  const resolved = new Map<string, { marketId: string; outcomeId: string }>()
-
-  try {
-    const eventIds = games.map(g => g.eventId)
-    const res = await fetch(`${proxyUrl}/markets-batch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': proxyKey },
-      body: JSON.stringify({ eventIds }),
-      signal: AbortSignal.timeout(20000),
-    })
-
-    if (!res.ok) {
-      console.error('[resolveRealSelections] proxy returned:', res.status)
-      return resolved
-    }
-
-    const data = await res.json()
-    if (!data.success || !data.markets) return resolved
-
-    for (const game of games) {
-      const eventMarkets = data.markets[game.eventId]
-      if (!eventMarkets || eventMarkets.length === 0) continue
-
-      const targetMarketId = String(game.marketId)
-      const targetOutcomeId = String(game.outcomeId)
-      const pick = game.pick.toLowerCase().trim()
-      const marketDesc = game.market.toLowerCase().trim()
-
-      // Try exact ID match first
-      const exactMarket = eventMarkets.find((m: { id: string }) => String(m.id) === targetMarketId)
-      if (exactMarket) {
-        const exactOutcome = exactMarket.outcomes?.find((o: { id: string }) => String(o.id) === targetOutcomeId)
-        if (exactOutcome) {
-          resolved.set(game.eventId, { marketId: exactMarket.id, outcomeId: exactOutcome.id })
-          continue
-        }
-      }
-
-      // Try description matching
-      for (const m of eventMarkets) {
-        const md = (m.desc || '').toLowerCase()
-        const marketMatches =
-          md === marketDesc || md.includes(marketDesc) || marketDesc.includes(md) ||
-          (marketDesc.includes('double chance') && md.includes('double chance')) ||
-          (marketDesc === 'gg/ng' && (md.includes('gg') || md.includes('both teams'))) ||
-          (marketDesc.includes('over/under') && md.includes('over/under') && !md.includes('corner')) ||
-          String(m.id) === targetMarketId
-
-        if (!marketMatches) continue
-
-        for (const o of (m.outcomes || [])) {
-          const od = (o.desc || '').toLowerCase()
-          let outcomeMatches = false
-
-          if (pick.startsWith('over') || pick.startsWith('under')) {
-            const pNum = parseFloat(pick.replace(/[^0-9.]/g, ''))
-            const oNum = parseFloat(od.replace(/[^0-9.]/g, ''))
-            const dir = pick.startsWith('over') ? 'over' : 'under'
-            if (!isNaN(pNum) && !isNaN(oNum)) outcomeMatches = od.startsWith(dir) && Math.abs(oNum - pNum) < 0.1
-          } else if (pick === 'home/draw' || pick === '1x') {
-            outcomeMatches = od === 'home/draw' || od === '1x' || (od.includes('home') && od.includes('draw'))
-          } else if (pick === 'draw/away' || pick === 'x2') {
-            outcomeMatches = od === 'draw/away' || od === 'x2' || (od.includes('draw') && od.includes('away'))
-          } else if (pick === 'home/away' || pick === '12') {
-            outcomeMatches = od === 'home/away' || od === '12'
-          } else if (pick === 'home' || pick === '1') {
-            outcomeMatches = od === 'home' || od === '1' || od === 'home win'
-          } else if (pick === 'away' || pick === '2') {
-            outcomeMatches = od === 'away' || od === '2' || od === 'away win'
-          } else if (pick === 'draw' || pick === 'x') {
-            outcomeMatches = od === 'draw' || od === 'x' || od === 'the draw'
-          } else if (pick === 'yes' || pick === 'gg') {
-            outcomeMatches = od === 'yes' || od === 'gg'
-          } else if (pick === 'no' || pick === 'ng') {
-            outcomeMatches = od === 'no' || od === 'ng'
-          } else {
-            outcomeMatches = od === pick || od.includes(pick) || pick.includes(od)
-          }
-
-          if (outcomeMatches) {
-            resolved.set(game.eventId, { marketId: m.id, outcomeId: o.id })
-            break
-          }
-        }
-        if (resolved.has(game.eventId)) break
-      }
-    }
-  } catch (err) {
-    console.error('[resolveRealSelections] failed:', err)
+// ─── RESOLVE CORRECT IDs FOR BOOKING ──────────────────────────────────────
+// Uses availableMarkets from decode response to find real marketId/outcomeId
+// This is the key function that makes booking codes work correctly
+export function resolveBookingIds(
+  game: SportyBetGame
+): { marketId: string; outcomeId: string } {
+  if (!game.availableMarkets?.length) {
+    return { marketId: game.marketId, outcomeId: game.outcomeId }
   }
 
-  console.log('[resolveRealSelections] resolved', resolved.size, 'of', games.length, 'games')
-  return resolved
+  const targetMarketId = String(game.marketId)
+  const targetOutcomeId = String(game.outcomeId)
+  const pick = game.pick.toLowerCase().trim()
+  const marketDesc = game.market.toLowerCase().trim()
+
+  // Step 1: Exact ID match
+  for (const m of game.availableMarkets) {
+    if (m.id === targetMarketId) {
+      const outcome = m.outcomes.find(o => o.id === targetOutcomeId)
+      if (outcome) return { marketId: m.id, outcomeId: outcome.id }
+    }
+  }
+
+  // Step 2: Match by market description + pick description
+  for (const m of game.availableMarkets) {
+    const md = m.desc.toLowerCase()
+    const marketMatches =
+      md === marketDesc || md.includes(marketDesc) || marketDesc.includes(md) ||
+      (marketDesc.includes('double chance') && md.includes('double chance')) ||
+      (marketDesc === 'gg/ng' && (md.includes('gg') || md.includes('both teams'))) ||
+      (marketDesc.includes('over/under') && md.includes('over/under') && !md.includes('corner'))
+
+    if (!marketMatches) continue
+
+    for (const o of m.outcomes) {
+      const od = o.desc.toLowerCase()
+      let outcomeMatches = false
+
+      if (pick.startsWith('over') || pick.startsWith('under')) {
+        const pNum = parseFloat(pick.replace(/[^0-9.]/g, ''))
+        const oNum = parseFloat(od.replace(/[^0-9.]/g, ''))
+        const dir = pick.startsWith('over') ? 'over' : 'under'
+        if (!isNaN(pNum) && !isNaN(oNum)) outcomeMatches = od.startsWith(dir) && Math.abs(oNum - pNum) < 0.1
+      } else if (pick === 'home/draw' || pick === '1x') {
+        outcomeMatches = od === 'home/draw' || od === '1x' || (od.includes('home') && od.includes('draw'))
+      } else if (pick === 'draw/away' || pick === 'x2') {
+        outcomeMatches = od === 'draw/away' || od === 'x2' || (od.includes('draw') && od.includes('away'))
+      } else if (pick === 'home/away' || pick === '12') {
+        outcomeMatches = od === 'home/away' || od === '12'
+      } else if (pick === 'home' || pick === '1') {
+        outcomeMatches = od === 'home' || od === '1' || od === 'home win'
+      } else if (pick === 'away' || pick === '2') {
+        outcomeMatches = od === 'away' || od === '2' || od === 'away win'
+      } else if (pick === 'draw' || pick === 'x') {
+        outcomeMatches = od === 'draw' || od === 'x' || od === 'the draw'
+      } else if (pick === 'yes' || pick === 'gg') {
+        outcomeMatches = od === 'yes' || od === 'gg'
+      } else if (pick === 'no' || pick === 'ng') {
+        outcomeMatches = od === 'no' || od === 'ng'
+      } else {
+        outcomeMatches = od === pick || od.includes(pick) || pick.includes(od)
+      }
+
+      if (outcomeMatches) return { marketId: m.id, outcomeId: o.id }
+    }
+  }
+
+  // Step 3: Fall back to original IDs
+  return { marketId: game.marketId, outcomeId: game.outcomeId }
 }
 
 // ─── CREATE BOOKING CODE ───────────────────────────────────────────────────
@@ -393,41 +362,29 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
   const PROXY_URL = 'https://sportybet-proxy.grooveslip.workers.dev'
   const PROXY_KEY = 'grooveslip_proxy_2026'
 
-  // Standard SportyBet market IDs that work for booking code creation
-  const STANDARD_MARKET_IDS = new Set([
-    '1','2','3','4','5','6','7','8','9','10','11','12','13','14','15',
-    '16','17','18','19','20','21','22','23','24','25','26','27','28',
-    '29','30','31','32','33','34','35','36','37','38','39','40','41',
-    '42','43','44','45','46','47','48','49','50',
-    '60020','60021','60022','60100','60200','60302','547'
-  ])
-
-  const standardGames = games.filter(g => STANDARD_MARKET_IDS.has(String(g.marketId)))
-  console.log('[createBookingCode] total:', games.length, '| standard:', standardGames.length, '| exotic filtered:', games.length - standardGames.length)
-
-  if (standardGames.length === 0) throw new Error('No standard markets available for booking code')
-
-  // Wake proxy (Cloudflare Workers — instant, no cold start)
-  await wakeProxy(PROXY_URL, PROXY_KEY)
-
-  // Fetch real IDs from SportyBet via Cloudflare Worker
-  const realIds = await resolveRealSelectionsFromProxy(standardGames, PROXY_URL, PROXY_KEY)
-
-  // Build final selections — use real IDs from SportyBet where available
-  const selections = standardGames.map(g => {
-    const real = realIds.get(g.eventId)
+  // Build selections using real IDs from availableMarkets
+  // This is the core fix — we use SportyBet's own data from the decode response
+  const selections = games.map(g => {
+    const resolved = resolveBookingIds(g)
     return {
       eventId: g.eventId,
-      marketId: real ? real.marketId : g.marketId || '1',
+      marketId: resolved.marketId,
       specifier: g.specifier || null,
-      outcomeId: real ? real.outcomeId : g.outcomeId || '1',
+      outcomeId: resolved.outcomeId,
     }
   })
 
-  console.log('[createBookingCode] sending', selections.length, 'selections to proxy')
+  console.log('[createBookingCode] selections:', selections.length, 'games')
+  console.log('[createBookingCode] sample:', JSON.stringify(selections.slice(0, 3)))
 
-  // Try proxy /share
+  // Try via proxy first
   try {
+    // Wake proxy
+    await fetch(`${PROXY_URL}/health`, {
+      headers: { 'X-Proxy-Key': PROXY_KEY },
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null)
+
     const proxyRes = await fetch(`${PROXY_URL}/share`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
@@ -445,10 +402,9 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
         return proxyData.data.shareCode
       }
 
-      // bizCode 19000 = one or more events expired/not found
-      // Retry removing events one by one until it works
+      // bizCode 19000 = expired event — retry removing events one by one
       if (proxyData?.bizCode === 19000) {
-        console.log('[createBookingCode] bizCode 19000 — removing expired events one by one')
+        console.log('[createBookingCode] bizCode 19000 — trying to find expired event')
         for (let i = 0; i < selections.length; i++) {
           const reduced = selections.filter((_, idx) => idx !== i)
           if (reduced.length === 0) continue
@@ -462,7 +418,7 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
             if (retryRes.ok) {
               const retryData = await retryRes.json()
               if (retryData?.bizCode === 10000 && retryData?.data?.shareCode) {
-                console.log('[createBookingCode] success after removing index', i, '—', standardGames[i]?.homeTeam, 'vs', standardGames[i]?.awayTeam)
+                console.log('[createBookingCode] success after removing index', i)
                 return retryData.data.shareCode
               }
             }
