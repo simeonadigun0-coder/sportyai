@@ -22,6 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   market: g.market,
 }))))
 const newCode = await createBookingCode(games)
+console.log('[rebook] newCode:', newCode)
 return res.status(200).json({ code: newCode })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to generate booking code'
