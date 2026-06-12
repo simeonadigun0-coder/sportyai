@@ -1,6 +1,6 @@
 import Groq from 'groq-sdk'
 import Anthropic from '@anthropic-ai/sdk'
-import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement, findSafestPickFromMarkets } from './sportybet'
+import { SportyBetGame, resolveFromAvailableMarkets, getSmartReplacement, findSafestPickFromMarkets, fetchLiveMarketsForEvents, AvailableMarket } from './sportybet'
 import { sendAdminAlert } from './email'
 import { Redis } from '@upstash/redis'
 
@@ -774,7 +774,7 @@ export async function analyseSlip(
   const isFootball = (g: SportyBetGame) =>
     !g.sport || g.sport.toLowerCase().includes('football') || g.sport.toLowerCase().includes('soccer')
 
-  // PHASE 1: Fetch data for ALL football games in parallel with 5s timeout
+  // PHASE 1A: Fetch BSD + Sofascore data for all games in parallel
   const dataMap = new Map<string, GameData>()
   await Promise.all(
     games.filter(isFootball).map(async (g) => {
@@ -788,6 +788,15 @@ export async function analyseSlip(
       })
     })
   )
+
+  // PHASE 1B: Fetch ALL live markets from SportyBet via Cloudflare Worker
+  // This runs in parallel with BSD/Sofascore fetch above
+  // Gives us real marketId/outcomeId for every pick including replacements
+  let liveMarketsMap = new Map<string, AvailableMarket[]>()
+  if (allowSwitching) {
+    liveMarketsMap = await fetchLiveMarketsForEvents(games)
+    console.log('[analyseSlip] live markets fetched for', liveMarketsMap.size, 'of', games.length, 'games')
+  }
 
   // PHASE 2: Smart pre-filter using actual data — zero AI tokens
   const preResults = new Map<string, PreFilterResult>()
@@ -849,27 +858,26 @@ export async function analyseSlip(
     }
 
     if (allowSwitching && finalReplacement && finalKeep) {
-      // Step 1: Use findSafestPickFromMarkets — scans ALL real SportyBet markets
-      // from the decode response to find the genuinely safest available pick
-      // This uses real IDs from SportyBet, not hardcoded guesses
-      const safest = game.availableMarkets?.length
-        ? findSafestPickFromMarkets(game.availableMarkets, game.marketId, game.outcomeId, game.odds)
+      // Use live markets from Cloudflare Worker — real SportyBet data
+      const liveMarkets = liveMarketsMap.get(game.eventId) || game.availableMarkets || []
+
+      // Find safest pick from real live market data
+      const safest = liveMarkets.length
+        ? findSafestPickFromMarkets(liveMarkets, game.marketId, game.outcomeId, game.odds)
         : null
 
-      // Step 2: If safest found from real markets, use it — override AI suggestion
-      // Real SportyBet data beats our hardcoded logic every time
       const finalPick = safest?.pick || finalReplacement.pick
       const finalMarket = safest?.market || finalReplacement.market
       const finalMarketId = safest?.marketId || null
       const finalOutcomeId = safest?.outcomeId || null
       const finalOdds = safest?.odds || estimateSaferOdds(game.odds, finalPick, finalMarket)
 
-      // Step 3: If no real market data, fall back to hardcoded IDs
+      // Fallback to hardcoded IDs if no live data
       const fallbackIds = !finalMarketId ? (
         hardcodedIds(finalPick, finalMarket) ||
         getSmartReplacement(game.marketId, game.outcomeId, game.pick, game.market, game.odds) ||
-        (game.availableMarkets?.length
-          ? (() => { const r = resolveFromAvailableMarkets(game.availableMarkets!, finalPick, finalMarket, game.odds); return r ? { marketId: r.marketId, outcomeId: r.outcomeId } : null })()
+        (liveMarkets.length
+          ? (() => { const r = resolveFromAvailableMarkets(liveMarkets, finalPick, finalMarket, game.odds); return r ? { marketId: r.marketId, outcomeId: r.outcomeId } : null })()
           : null)
       ) : null
 
@@ -888,7 +896,7 @@ export async function analyseSlip(
           replacedMarketDesc: finalMarket,
           replacedOdds: finalOdds,
           replacementReason: safest
-            ? `Safest available pick: ${finalPick} (${finalMarket}) @ ${finalOdds} — from ${game.homeTeam} vs ${game.awayTeam} real markets`
+            ? `Safest available: ${finalPick} (${finalMarket}) @ ${finalOdds} — verified from SportyBet live data`
             : finalReplacement.reason,
           marketId: resolvedMarketId,
           outcomeId: resolvedOutcomeId,
@@ -909,16 +917,10 @@ export async function analyseSlip(
     for (const g of safest) { if (keptGames.length >= 2) break; keptGames.push(g) }
   }
 
-  // PHASE 5: IDs already resolved from availableMarkets during analysis
-  // Real odds already set from findSafestPickFromMarkets
-  // This phase is kept as a no-op for future proxy-based enhancement
+  // PHASE 5: Real IDs already resolved from live markets in Phase 1B + 4
+  // No additional proxy calls needed
   const replacedGames = keptGames.filter(g => g.replaced)
-  if (replacedGames.length > 0) {
-    await Promise.all(replacedGames.map(async () => {
-      // IDs already correct from Phase 4 using availableMarkets
-      // No additional proxy call needed
-    }))
-  }
+  console.log('[analyseSlip] replaced games:', replacedGames.length)
 
   const keptIds = new Set(keptGames.map(g => g.eventId))
   const finalGames = analysisResults.map(g => ({ ...g, keep: keptIds.has(g.eventId) }))
