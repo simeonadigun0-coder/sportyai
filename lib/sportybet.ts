@@ -151,9 +151,14 @@ export function findSafestPickFromMarkets(
   for (const m of availableMarkets) {
     const mDesc = m.desc.toLowerCase()
 
-    // Skip risky/irrelevant markets
-    if (mDesc.includes('corner') || mDesc.includes('booking') ||
-        mDesc.includes('card') || mDesc.includes('offside') ||
+    // Only use markets with bookable IDs
+    const BOOKABLE_MARKET_IDS = new Set([
+      '1','2','3','4','5','6','7','8','9',
+      '18','19','20','21','29','30','45','47',
+      '60020','60021','60022','60100','60110','60200','60302','547'
+    ])
+    if (!BOOKABLE_MARKET_IDS.has(m.id)) continue
+    if (mDesc.includes('card') || mDesc.includes('offside') ||
         mDesc.includes('penalty') || mDesc.includes('minute') ||
         mDesc.includes('2nd half') || mDesc.includes('first half') ||
         mDesc.includes('1st half') || mDesc.includes('half time') ||
@@ -357,9 +362,16 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
   console.log('[createBookingCode] got live markets for', liveMarketsMap.size, 'games')
 
   // Step 2: Build selections using live market data
-  const selections = games.map(g => {
-    const liveMarkets = liveMarketsMap.get(g.eventId)
-    const resolved = resolveBookingIds(g, liveMarkets)
+  const BOOKABLE_IDS = new Set([
+  '1','2','3','4','5','6','7','8','9',
+  '18','19','20','21','29','30','45','47',
+  '60020','60021','60022','60100','60110','60200','60302','547'
+])
+
+const selections = games.map(g => {
+  const liveMarkets = (liveMarketsMap.get(g.eventId) || [])
+    .filter(m => BOOKABLE_IDS.has(m.id))
+  const resolved = resolveBookingIds(g, liveMarkets)
     return {
       eventId: g.eventId,
       marketId: resolved.marketId,
