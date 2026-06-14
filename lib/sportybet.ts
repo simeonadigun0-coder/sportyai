@@ -360,10 +360,7 @@ export function resolveBookingIds(
 export async function createBookingCode(games: SportyBetGame[]): Promise<string> {
   console.log('[createBookingCode] starting for', games.length, 'games')
 
-  // Fetch live markets and attempt quick booking simultaneously
-  const liveMarketsPromise = fetchLiveMarketsForEvents(games)
-
-  // Quick attempt using normalised IDs from decode data
+  // Build selections using normalised IDs from decode data
   const quickSelections = games.map(g => {
     const resolved = resolveBookingIds(g, g.availableMarkets)
     return {
@@ -374,8 +371,12 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
     }
   })
 
-  console.log('[createBookingCode] quick attempt, sample:', JSON.stringify(quickSelections.slice(0, 2)))
+  // Fetch live markets simultaneously
+  const liveMarketsPromise = fetchLiveMarketsForEvents(games)
 
+  // Quick attempt first
+  console.log('[createBookingCode] quick attempt, sample:', JSON.stringify(quickSelections.slice(0, 2)))
+  let shareCode = ''
   try {
     const quickRes = await fetch(`${PROXY_URL}/share`, {
       method: 'POST',
@@ -387,13 +388,12 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
       const quickData = await quickRes.json()
       console.log('[createBookingCode] quick bizCode:', quickData?.bizCode)
       if (quickData?.bizCode === 10000 && quickData?.data?.shareCode) {
-        console.log('[createBookingCode] quick booking succeeded')
         return quickData.data.shareCode
       }
     }
   } catch { /* fall through */ }
 
-  // Wait for live markets and retry
+  // Wait for live markets
   const liveMarketsMap = await liveMarketsPromise
   console.log('[createBookingCode] live markets for', liveMarketsMap.size, 'games')
 
@@ -424,24 +424,26 @@ export async function createBookingCode(games: SportyBetGame[]): Promise<string>
       if (proxyData?.bizCode === 10000 && proxyData?.data?.shareCode) {
         return proxyData.data.shareCode
       }
-      // bizCode 19000 — remove events with no live market data (likely expired)
       if (proxyData?.bizCode === 19000) {
-        console.log('[createBookingCode] 19000 — removing events with no live markets')
-        const filtered = liveSelections.filter(s => liveMarketsMap.get(s.eventId)?.length)
-        if (filtered.length > 0 && filtered.length < liveSelections.length) {
-          const retryRes = await fetch(`${PROXY_URL}/share`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
-            body: JSON.stringify({ selections: filtered }),
-            signal: AbortSignal.timeout(10000),
-          })
-          if (retryRes.ok) {
-            const retryData = await retryRes.json()
-            console.log('[createBookingCode] retry bizCode:', retryData?.bizCode)
-            if (retryData?.bizCode === 10000 && retryData?.data?.shareCode) {
-              return retryData.data.shareCode
+        console.log('[createBookingCode] 19000 — isolating bad event')
+        for (let i = 0; i < liveSelections.length; i++) {
+          const reduced = liveSelections.filter((_, idx) => idx !== i)
+          if (reduced.length === 0) continue
+          try {
+            const retryRes = await fetch(`${PROXY_URL}/share`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
+              body: JSON.stringify({ selections: reduced }),
+              signal: AbortSignal.timeout(8000),
+            })
+            if (retryRes.ok) {
+              const retryData = await retryRes.json()
+              if (retryData?.bizCode === 10000 && retryData?.data?.shareCode) {
+                console.log('[createBookingCode] success after removing index', i, games[i]?.homeTeam, 'vs', games[i]?.awayTeam)
+                return retryData.data.shareCode
+              }
             }
-          }
+          } catch { continue }
         }
       }
     }
