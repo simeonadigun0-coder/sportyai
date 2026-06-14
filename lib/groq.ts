@@ -9,8 +9,7 @@ const PROXY_KEY = 'grooveslip_proxy_2026'
 const ADMIN_EMAIL = 'simeonadigun0@gmail.com'
 
 // ─── AI PROVIDER CONFIG ────────────────────────────────────────────────────
-// Primary: Groq now — change PRIMARY_AI to 'claude' when ready
-// FALLBACK_AI stays 'groq' as backup
+// Change PRIMARY_AI to 'claude' when ready to switch
 const PRIMARY_AI: 'claude' | 'groq' = 'groq'
 const FALLBACK_AI: 'claude' | 'groq' = 'groq'
 
@@ -18,14 +17,10 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' })
 
 // ─── REDIS TOKEN TRACKING ──────────────────────────────────────────────────
-// Persists across Vercel cold starts — accurate daily tracking
 let redis: Redis | null = null
 try {
   if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    redis = new Redis({
-      url: process.env.KV_REST_API_URL,
-      token: process.env.KV_REST_API_TOKEN,
-    })
+    redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN })
   }
 } catch { redis = null }
 
@@ -33,45 +28,31 @@ const TOKEN_BUDGETS = {
   groq: parseInt(process.env.GROQ_DAILY_TOKEN_BUDGET || '500000'),
   claude: parseInt(process.env.CLAUDE_DAILY_TOKEN_BUDGET || '100000'),
 }
-const ALERT_THRESHOLD = 0.80
 
 async function trackTokens(provider: 'groq' | 'claude', tokensUsed: number) {
   try {
-    const today = new Date().toISOString().split('T')[0] // e.g. "2026-06-10"
+    const today = new Date().toISOString().split('T')[0]
     const key = `token_usage:${provider}:${today}`
     const alertKey = `token_alert_sent:${provider}:${today}`
-
-    let currentUsage = 0
+    let currentUsage = tokensUsed
     let alertSent = false
-
     if (redis) {
-      // Increment token count in Redis — persists across cold starts
       currentUsage = await redis.incrby(key, tokensUsed)
-      // Set expiry to 25 hours so it auto-cleans daily
       await redis.expire(key, 90000)
       alertSent = !!(await redis.get(alertKey))
-    } else {
-      // Fallback to in-memory if Redis unavailable
-      currentUsage = tokensUsed
     }
-
     const budget = TOKEN_BUDGETS[provider]
     const usagePercent = currentUsage / budget
-
-    if (usagePercent >= ALERT_THRESHOLD && !alertSent) {
-      // Mark alert as sent in Redis
-      if (redis) {
-        await redis.set(alertKey, '1', { ex: 90000 })
-      }
+    if (usagePercent >= 0.80 && !alertSent) {
+      if (redis) await redis.set(alertKey, '1', { ex: 90000 })
       const percent = Math.round(usagePercent * 100)
       await sendAdminAlert({
         subject: `🚨 Groove Slip — ${provider.toUpperCase()} API at ${percent}% token budget`,
-        text: `Your ${provider.toUpperCase()} API has used ${percent}% of its daily token budget.\n\nTokens used today: ${currentUsage.toLocaleString()} / ${budget.toLocaleString()}\nDate: ${today}\n\nAction needed:\n- Go to ${provider === 'groq' ? 'console.groq.com' : 'console.anthropic.com'} to check usage\n- Consider upgrading your plan or rotating the API key\n- Update the key in Vercel environment variables if needed\n\nGroove Slip will automatically use the ${FALLBACK_AI.toUpperCase()} fallback if this provider fails.`,
+        text: `Your ${provider.toUpperCase()} API has used ${percent}% of its daily token budget.\n\nTokens used: ${currentUsage.toLocaleString()} / ${budget.toLocaleString()}\nDate: ${today}\n\nGo to ${provider === 'groq' ? 'console.groq.com' : 'console.anthropic.com'} to check usage.\nUpdate the key in Vercel environment variables if needed.\n\nGroove Slip will automatically use ${FALLBACK_AI.toUpperCase()} as fallback.`,
       })
-      console.log(`[token-alert] ${provider} at ${percent}% — alert sent to ${ADMIN_EMAIL}`)
     }
   } catch (err) {
-    console.error('[trackTokens] error:', err)
+    console.error('[trackTokens]', err)
   }
 }
 
@@ -83,15 +64,6 @@ const sofaHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Accept': 'application/json',
   'Referer': 'https://www.sofascore.com/',
-}
-
-// ─── 5-SECOND TIMEOUT WRAPPER ──────────────────────────────────────────────
-// Cuts off slow API calls that would hang and push past Vercel's 10s limit
-// 5s gives BSD/Sofascore enough time for legitimate slow responses
-// while killing calls that were going to fail anyway
-async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  const timeout = new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
-  return Promise.race([promise, timeout])
 }
 
 export interface GameAnalysis extends SportyBetGame {
@@ -123,6 +95,7 @@ export interface SlipAnalysis {
   summary: string
 }
 
+// ─── BSD DATA ──────────────────────────────────────────────────────────────
 interface BSDData {
   raw: string
   predictionResult: string | null
@@ -155,28 +128,22 @@ function teamsMatch(a: string, b: string, c: string, d: string) {
   const fw = (s: string) => normalize(s).split(' ')[0]
   return normalize(a).includes(fw(c)) && normalize(b).includes(fw(d))
 }
-
 function emptyBSD(): BSDData {
-  return {
-    raw: '', predictionResult: null, probHome: 0, probDraw: 0, probAway: 0,
-    homeForm: '', awayForm: '', h2hHomeWins: 0, h2hDraws: 0, h2hAwayWins: 0,
-    avgGoalsH2H: 0, homeAvgScored: 0, homeAvgConceded: 0, awayAvgScored: 0,
-    awayAvgConceded: 0, hasData: false,
-  }
+  return { raw: '', predictionResult: null, probHome: 0, probDraw: 0, probAway: 0, homeForm: '', awayForm: '', h2hHomeWins: 0, h2hDraws: 0, h2hAwayWins: 0, avgGoalsH2H: 0, homeAvgScored: 0, homeAvgConceded: 0, awayAvgScored: 0, awayAvgConceded: 0, hasData: false }
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([promise, new Promise<T>(resolve => setTimeout(() => resolve(fallback), ms))])
 }
 
 async function getBSDData(homeTeam: string, awayTeam: string): Promise<BSDData> {
-  const fetch5s = (url: string, opts: RequestInit) =>
-    withTimeout(fetch(url, { ...opts, signal: AbortSignal.timeout(5000) }), 5000, null as unknown as Response)
-
   try {
     const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
     const next2w = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
-
     for (const term of [homeTeam, homeTeam.split(' ')[0], awayTeam]) {
-      const res = await fetch5s(
-        `${BSD_BASE}/events/?team=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${next2w}&limit=20`,
-        { headers: bsdHeaders }
+      const res = await withTimeout(
+        fetch(`${BSD_BASE}/events/?team=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${next2w}&limit=20`, { headers: bsdHeaders }),
+        5000, null as unknown as Response
       )
       if (!res || !res.ok) continue
       const data = await res.json()
@@ -185,58 +152,37 @@ async function getBSDData(homeTeam: string, awayTeam: string): Promise<BSDData> 
         return teamsMatch(ev.home_team as string || '', ev.away_team as string || '', homeTeam, awayTeam)
       })
       if (!match) continue
-
       const ev = match as Record<string, unknown>
-      const det = await fetch5s(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders })
+      const det = await withTimeout(fetch(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders }), 5000, null as unknown as Response)
       const event = (det && det.ok) ? await det.json() : ev
-
       const hf = event.home_form as Record<string, unknown> | null
       const af = event.away_form as Record<string, unknown> | null
       const h2h = event.head_to_head as Record<string, unknown> | null
       const pred = event.prediction as Record<string, unknown> | null
-
-      const homeWins = Number(hf?.wins || 0)
-      const homeDraws = Number(hf?.draws || 0)
-      const homeLosses = Number(hf?.losses || 0)
-      const awayWins = Number(af?.wins || 0)
-      const awayDraws = Number(af?.draws || 0)
-      const awayLosses = Number(af?.losses || 0)
-      const homeScored = Number(hf?.goals_scored_last_n || 0)
-      const homeConceded = Number(hf?.goals_conceded_last_n || 0)
-      const awayScored = Number(af?.goals_scored_last_n || 0)
-      const awayConceded = Number(af?.goals_conceded_last_n || 0)
+      const homeWins = Number(hf?.wins || 0), homeDraws = Number(hf?.draws || 0), homeLosses = Number(hf?.losses || 0)
+      const awayWins = Number(af?.wins || 0), awayDraws = Number(af?.draws || 0), awayLosses = Number(af?.losses || 0)
+      const homeScored = Number(hf?.goals_scored_last_n || 0), homeConceded = Number(hf?.goals_conceded_last_n || 0)
+      const awayScored = Number(af?.goals_scored_last_n || 0), awayConceded = Number(af?.goals_conceded_last_n || 0)
       const homeGames = homeWins + homeDraws + homeLosses || 1
       const awayGames = awayWins + awayDraws + awayLosses || 1
-
-      const h2hHW = Number(h2h?.home_wins || 0)
-      const h2hD = Number(h2h?.draws || 0)
-      const h2hAW = Number(h2h?.away_wins || 0)
+      const h2hHW = Number(h2h?.home_wins || 0), h2hD = Number(h2h?.draws || 0), h2hAW = Number(h2h?.away_wins || 0)
       const h2hTotal = h2hHW + h2hD + h2hAW || 1
       const h2hGoals = Number(h2h?.total_goals || 0)
-
-      const probHome = Number(pred?.prob_home_win || 0)
-      const probDraw = Number(pred?.prob_draw || 0)
-      const probAway = Number(pred?.prob_away_win || 0)
+      const probHome = Number(pred?.prob_home_win || 0), probDraw = Number(pred?.prob_draw || 0), probAway = Number(pred?.prob_away_win || 0)
       const predResult = String(pred?.predicted_result || '')
-
       const parts: string[] = []
       if (hf) parts.push(`H:${hf.form_string || '?'} W${homeWins}D${homeDraws}L${homeLosses} GF${homeScored}GA${homeConceded}`)
       if (af) parts.push(`A:${af.form_string || '?'} W${awayWins}D${awayDraws}L${awayLosses} GF${awayScored}GA${awayConceded}`)
       if (h2h) parts.push(`H2H(${h2hTotal}):HW${h2hHW}D${h2hD}AW${h2hAW} goals:${h2hGoals}`)
       if (pred) parts.push(`Pred:${predResult} H${probHome}%D${probDraw}%A${probAway}%`)
-
       return {
-        raw: parts.join('|'),
-        predictionResult: predResult || null,
+        raw: parts.join('|'), predictionResult: predResult || null,
         probHome, probDraw, probAway,
-        homeForm: String(hf?.form_string || ''),
-        awayForm: String(af?.form_string || ''),
+        homeForm: String(hf?.form_string || ''), awayForm: String(af?.form_string || ''),
         h2hHomeWins: h2hHW, h2hDraws: h2hD, h2hAwayWins: h2hAW,
-        avgGoalsH2H: h2hTotal > 0 ? h2hGoals / h2hTotal : 0,
-        homeAvgScored: homeScored / homeGames,
-        homeAvgConceded: homeConceded / homeGames,
-        awayAvgScored: awayScored / awayGames,
-        awayAvgConceded: awayConceded / awayGames,
+        avgGoalsH2H: h2hGoals / h2hTotal,
+        homeAvgScored: homeScored / homeGames, homeAvgConceded: homeConceded / homeGames,
+        awayAvgScored: awayScored / awayGames, awayAvgConceded: awayConceded / awayGames,
         hasData: true,
       }
     }
@@ -247,20 +193,14 @@ async function getBSDData(homeTeam: string, awayTeam: string): Promise<BSDData> 
 async function getSofaData(homeTeam: string, awayTeam: string): Promise<string> {
   try {
     const getId = async (name: string): Promise<number | null> => {
-      const res = await withTimeout(
-        fetch(`${SOFA_BASE}/search/teams/${encodeURIComponent(name)}`, { headers: sofaHeaders }),
-        5000, null as unknown as Response
-      )
+      const res = await withTimeout(fetch(`${SOFA_BASE}/search/teams/${encodeURIComponent(name)}`, { headers: sofaHeaders }), 4000, null as unknown as Response)
       if (!res || !res.ok) return null
       const teams = (await res.json()).teams || []
       const match = teams.find((t: unknown) => normalize((t as Record<string, unknown>).name as string || '').includes(normalize(name).split(' ')[0]))
       return ((match || teams[0]) as Record<string, unknown>)?.id as number || null
     }
     const getForm = async (id: number, name: string): Promise<string> => {
-      const res = await withTimeout(
-        fetch(`${SOFA_BASE}/team/${id}/events/last/0`, { headers: sofaHeaders }),
-        5000, null as unknown as Response
-      )
+      const res = await withTimeout(fetch(`${SOFA_BASE}/team/${id}/events/last/0`, { headers: sofaHeaders }), 4000, null as unknown as Response)
       if (!res || !res.ok) return ''
       const events = ((await res.json()).events || []).slice(-5) as unknown[]
       let w = 0, d = 0, l = 0
@@ -275,73 +215,14 @@ async function getSofaData(homeTeam: string, awayTeam: string): Promise<string> 
     }
     const [hId, aId] = await Promise.all([getId(homeTeam), getId(awayTeam)])
     if (!hId && !aId) return ''
-    const [hf, af] = await Promise.all([
-      hId ? getForm(hId, homeTeam) : Promise.resolve(''),
-      aId ? getForm(aId, awayTeam) : Promise.resolve(''),
-    ])
+    const [hf, af] = await Promise.all([hId ? getForm(hId, homeTeam) : Promise.resolve(''), aId ? getForm(aId, awayTeam) : Promise.resolve('')])
     return [hf, af].filter(Boolean).join('|')
   } catch { return '' }
 }
 
-// ─── SMART NO-DATA FALLBACK ────────────────────────────────────────────────
-// When BSD/Sofascore can't find the match, use smarter rules than just odds
-function noDataDecision(
-  game: SportyBetGame,
-  allowSwitching: boolean
-): { decision: 'keep' | 'remove' | 'replace' | 'ai'; confidence: number; reason: string; suggestedPick?: string; suggestedMarket?: string } {
-  const market = game.market.toLowerCase().trim()
-  const pick = game.pick.toLowerCase().trim()
-  const odds = game.odds
-
-  // Already safest — always keep
-  if (market.includes('double chance')) return { decision: 'keep', confidence: 72, reason: 'Double Chance is already the safest market option' }
-  if (market.includes('over/under') && pick === 'over 0.5') return { decision: 'keep', confidence: 68, reason: 'Over 0.5 is the safest over/under option' }
-
-  // 2UP/1UP — always risky without data
-  if (market.includes('2up')) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 32, reason: '2UP requires dominant winning margin — too risky without data', suggestedPick: pick === 'home' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
-  if (market.includes('1up')) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: '1UP requires winning margin — risky without supporting data', suggestedPick: pick === 'home' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
-
-  // Draw — always risky without data
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'draw' || pick === 'x')) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: 'Draw is unpredictable — no data to support it', suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
-  }
-
-  // Over 2.5+ without data — risky
-  if (market.includes('over/under') && !market.includes('corner')) {
-    const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
-    if (pick.startsWith('over') && !isNaN(num)) {
-      if (num >= 2.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Over ${num} is high risk without goal data to support it`, suggestedPick: num >= 3.5 ? 'Over 2.5' : 'Over 1.5', suggestedMarket: 'Over/Under' }
-      if (num >= 1.5 && odds > 1.5) return { decision: allowSwitching ? 'replace' : 'ai', confidence: 44, reason: `Over ${num} at ${odds} odds needs data verification`, suggestedPick: 'Over 0.5', suggestedMarket: 'Over/Under' }
-      if (num >= 1.5) return { decision: 'keep', confidence: 58, reason: `Over ${num} at ${odds} odds — low risk without data` }
-    }
-  }
-
-  // Away win at high odds without data
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'away' || pick === '2') && odds >= 2.0) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 36, reason: `Away win at ${odds} odds — risky without data`, suggestedPick: 'Draw/Away', suggestedMarket: 'Double Chance' }
-  }
-
-  // Home win at high odds without data
-  if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds >= 2.5) {
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Home win at ${odds} odds — risky without data`, suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
-  }
-
-  // GG Yes without data
-  if ((market.includes('gg') || market.includes('both teams')) && (pick === 'yes' || pick === 'gg')) {
-    return { decision: allowSwitching ? 'replace' : 'ai', confidence: 45, reason: 'GG Yes needs scoring data — unavailable for this match', suggestedPick: 'No', suggestedMarket: 'GG/NG' }
-  }
-
-  // Very high odds without data — remove
-  if (odds >= 4.0) return { decision: 'remove', confidence: 28, reason: `Odds of ${odds} are very high risk without any supporting data` }
-  if (odds >= 2.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `${odds} odds is significant risk without data` }
-
-  // Low odds, relatively safe market — keep
-  if (odds <= 1.4) return { decision: 'keep', confidence: 65, reason: `Low odds of ${odds} — reasonably safe even without data` }
-
-  return { decision: 'keep', confidence: 55, reason: `No data available — kept based on acceptable odds (${odds})` }
-}
-
-// ─── SMART PRE-FILTER (with data) ─────────────────────────────────────────
+// ─── SMART PRE-FILTER ─────────────────────────────────────────────────────
+// Uses actual BSD data to make intelligent keep/replace/remove decisions
+// In replace mode: EVERY replaceable game MUST be replaced — not avoided
 type PreDecision = 'keep' | 'remove' | 'replace' | 'ai'
 interface PreFilterResult {
   decision: PreDecision
@@ -356,11 +237,54 @@ function smartPreFilter(game: SportyBetGame, bsd: BSDData, allowSwitching: boole
   const pick = game.pick.toLowerCase().trim()
   const odds = game.odds
 
-  if (!bsd.hasData) return noDataDecision(game, allowSwitching)
+  // Already safest markets — keep
+  if (market.includes('double chance') && !market.includes('1up') && !market.includes('2up')) {
+    return { decision: 'keep', confidence: 78, reason: 'Double Chance is already a safe market' }
+  }
+  if (market.includes('draw no bet')) {
+    return { decision: 'keep', confidence: 76, reason: 'Draw No Bet is a safe market' }
+  }
+  if (market.includes('over/under') && !market.includes('corner') && pick === 'over 0.5') {
+    return { decision: 'keep', confidence: 80, reason: 'Over 0.5 is the safest over/under line' }
+  }
 
-  if (market.includes('double chance')) return { decision: 'keep', confidence: 78, reason: 'Double Chance is already a safe market' }
+  // No data — use smart market-based decisions
+  if (!bsd.hasData) {
+    // 2UP/1UP — always risky without data
+    if (market.includes('2up')) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 32, reason: '2UP requires dominant winning margin — risky without data', suggestedPick: pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
+    if (market.includes('1up')) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: '1UP requires winning margin — risky without data', suggestedPick: pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
+    // Draw — always risky without data
+    if ((market === '1x2' || market.includes('1x2')) && (pick === 'draw' || pick === 'x')) {
+      return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: 'Draw without data — too unpredictable', suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
+    }
+    // Away win without data
+    if ((market === '1x2' || market.includes('1x2')) && (pick === 'away' || pick === '2')) {
+      return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Away win at ${odds} without data — risky`, suggestedPick: 'Draw/Away', suggestedMarket: 'Double Chance' }
+    }
+    // Home win at high odds without data
+    if ((market === '1x2' || market.includes('1x2')) && (pick === 'home' || pick === '1') && odds >= 2.0) {
+      return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Home win at ${odds} without data — risky`, suggestedPick: 'Home/Draw', suggestedMarket: 'Double Chance' }
+    }
+    // Over 2.5+ without data — replace
+    if (market.includes('over/under') && !market.includes('corner')) {
+      const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
+      if (pick.startsWith('over') && !isNaN(num)) {
+        if (num >= 2.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Over ${num} without goal data — risky`, suggestedPick: num >= 3.5 ? 'Over 2.5' : 'Over 1.5', suggestedMarket: 'Over/Under' }
+        if (num >= 1.5 && odds > 1.5) return { decision: allowSwitching ? 'replace' : 'ai', confidence: 44, reason: `Over ${num} at ${odds} needs data verification`, suggestedPick: 'Over 0.5', suggestedMarket: 'Over/Under' }
+      }
+    }
+    // GG Yes without data
+    if ((market.includes('gg') || market.includes('both teams')) && (pick === 'yes' || pick === 'gg')) {
+      return { decision: allowSwitching ? 'replace' : 'ai', confidence: 45, reason: 'GG Yes needs scoring data', suggestedPick: 'No', suggestedMarket: 'GG/NG' }
+    }
+    // Very high odds
+    if (odds >= 4.0) return { decision: 'remove', confidence: 28, reason: `Odds of ${odds} — very high risk without data` }
+    if (odds >= 2.5) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `${odds} odds is significant risk without data`, suggestedPick: (market === '1x2' || market.includes('1x2')) ? (pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away') : undefined, suggestedMarket: (market === '1x2' || market.includes('1x2')) ? 'Double Chance' : undefined }
+    if (odds <= 1.4) return { decision: 'keep', confidence: 65, reason: `Low odds of ${odds} — safe enough without data` }
+    return { decision: 'keep', confidence: 55, reason: `No data — kept based on acceptable odds (${odds})` }
+  }
 
-  // Pick probability from BSD prediction
+  // We have BSD data — make intelligent decisions
   let pickProbability = 0
   if (pick === 'home' || pick === '1') pickProbability = bsd.probHome
   else if (pick === 'away' || pick === '2') pickProbability = bsd.probAway
@@ -368,23 +292,21 @@ function smartPreFilter(game: SportyBetGame, bsd: BSDData, allowSwitching: boole
 
   // 1X2 decisions
   if (market === '1x2' || (market.includes('1x2') && !market.includes('up'))) {
-    if (pickProbability >= 65) return { decision: 'keep', confidence: Math.min(85, pickProbability), reason: `BSD prediction strongly supports this pick (${pickProbability}% probability)` }
+    if (pickProbability >= 65) return { decision: 'keep', confidence: Math.min(85, pickProbability), reason: `BSD supports this pick strongly (${pickProbability}% probability)` }
     if (pickProbability >= 50) return { decision: 'ai', confidence: pickProbability, reason: `Moderate probability (${pickProbability}%) — AI will assess form and H2H` }
-    if (pick === 'draw' || pick === 'x') return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Draw probability only ${bsd.probDraw}% — risky pick`, suggestedPick: bsd.probHome > bsd.probAway ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
-    if (pickProbability < 50) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Only ${pickProbability}% win probability — data does not support this pick`, suggestedPick: pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
+    if (pick === 'draw' || pick === 'x') return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Draw probability only ${bsd.probDraw}% — data does not support`, suggestedPick: bsd.probHome > bsd.probAway ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Only ${pickProbability}% win probability — data does not support this pick`, suggestedPick: pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
   }
 
-  // Over/Under using goal data
+  // Over/Under using real goal data
   if (market.includes('over/under') && !market.includes('corner')) {
     const num = parseFloat(pick.replace(/[^0-9.]/g, ''))
     if (!isNaN(num)) {
       const expectedGoals = ((bsd.homeAvgScored + bsd.awayAvgConceded) / 2) + ((bsd.awayAvgScored + bsd.homeAvgConceded) / 2)
       const h2hAvg = bsd.avgGoalsH2H
-
       if (pick.startsWith('over')) {
         const goalsSupport = expectedGoals > num && h2hAvg > num
         const goalsMarginal = expectedGoals > num * 0.85 || h2hAvg > num * 0.85
-
         if (num <= 0.5) return { decision: 'keep', confidence: 80, reason: 'Over 0.5 — very likely with any goal scored' }
         if (num <= 1.5) {
           if (goalsSupport) return { decision: 'keep', confidence: 75, reason: `Expected goals ${expectedGoals.toFixed(1)} and H2H avg ${h2hAvg.toFixed(1)} support Over ${num}` }
@@ -392,12 +314,12 @@ function smartPreFilter(game: SportyBetGame, bsd: BSDData, allowSwitching: boole
           return { decision: 'ai', confidence: 55, reason: `Borderline scoring data for Over ${num} — AI will assess` }
         }
         if (num >= 2.5) {
-          if (goalsSupport && expectedGoals >= num) return { decision: 'keep', confidence: 65, reason: `Strong scoring data (exp:${expectedGoals.toFixed(1)}, H2H:${h2hAvg.toFixed(1)}) supports Over ${num}` }
+          if (goalsSupport) return { decision: 'keep', confidence: 65, reason: `Strong scoring data (exp:${expectedGoals.toFixed(1)}, H2H:${h2hAvg.toFixed(1)}) supports Over ${num}` }
           return { decision: allowSwitching ? 'replace' : 'remove', confidence: 38, reason: `Expected goals ${expectedGoals.toFixed(1)} insufficient for Over ${num}`, suggestedPick: num >= 3.5 ? 'Over 2.5' : 'Over 1.5', suggestedMarket: 'Over/Under' }
         }
         if (goalsSupport) return { decision: 'keep', confidence: 68, reason: `Goal data supports Over ${num} (exp:${expectedGoals.toFixed(1)})` }
         if (!goalsMarginal) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 42, reason: `Low expected goals (${expectedGoals.toFixed(1)}) for Over ${num}`, suggestedPick: 'Over 0.5', suggestedMarket: 'Over/Under' }
-        return { decision: 'ai', confidence: 52, reason: `Marginal goal data for Over ${num} — AI will make final call` }
+        return { decision: 'ai', confidence: 52, reason: `Marginal goal data for Over ${num} — AI will decide` }
       }
     }
   }
@@ -415,60 +337,23 @@ function smartPreFilter(game: SportyBetGame, bsd: BSDData, allowSwitching: boole
 
   // 2UP
   if (market.includes('2up')) {
-    const homeDominant = bsd.probHome >= 70 && bsd.homeAvgScored >= 2.0
-    if ((pick === 'home' || pick === '1') && homeDominant) return { decision: 'ai', confidence: 55, reason: `Home looks dominant (${bsd.probHome}% prob) — AI will verify 2UP viability` }
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Data doesn't strongly support 2UP margin`, suggestedPick: pick === 'home' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
+    if ((pick === 'home' || pick === '1') && bsd.probHome >= 70 && bsd.homeAvgScored >= 2.0) return { decision: 'ai', confidence: 55, reason: `Home dominant (${bsd.probHome}% prob) — AI will verify 2UP` }
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Data doesn't support 2UP margin`, suggestedPick: pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
   }
 
   // 1UP
   if (market.includes('1up')) {
-    if ((pick === 'home' || pick === '1') && bsd.probHome >= 60) return { decision: 'ai', confidence: 58, reason: `${bsd.probHome}% home probability — AI will assess 1UP viability` }
-    if ((pick === 'away' || pick === '2') && bsd.probAway >= 60) return { decision: 'ai', confidence: 58, reason: `${bsd.probAway}% away probability — AI will assess 1UP viability` }
-    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 40, reason: `Insufficient probability for 1UP market`, suggestedPick: pick === 'home' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
+    if ((pick === 'home' || pick === '1') && bsd.probHome >= 60) return { decision: 'ai', confidence: 58, reason: `${bsd.probHome}% home probability — AI will assess 1UP` }
+    if ((pick === 'away' || pick === '2') && bsd.probAway >= 60) return { decision: 'ai', confidence: 58, reason: `${bsd.probAway}% away probability — AI will assess 1UP` }
+    return { decision: allowSwitching ? 'replace' : 'remove', confidence: 40, reason: `Insufficient probability for 1UP`, suggestedPick: pick === 'home' || pick === '1' ? 'Home/Draw' : 'Draw/Away', suggestedMarket: 'Double Chance' }
   }
 
-  // Very high odds
-  if (odds >= 4.0) return { decision: 'remove', confidence: 30, reason: `Odds of ${odds} are very high risk` }
+  if (odds >= 4.0) return { decision: 'remove', confidence: 30, reason: `Odds of ${odds} — very high risk` }
   if (odds >= 2.5 && pickProbability > 0 && pickProbability < 45) return { decision: allowSwitching ? 'replace' : 'remove', confidence: 35, reason: `Only ${pickProbability}% probability at ${odds} odds` }
-
   return { decision: 'ai', confidence: 60, reason: 'AI will analyse available data for final decision' }
 }
 
-// ─── VALID REPLACEMENTS ────────────────────────────────────────────────────
-function getValidReplacements(market: string, pick: string): Array<{ pick: string; market: string }> {
-  const m = market.toLowerCase().trim()
-  const p = pick.toLowerCase().trim()
-  if (m.includes('double chance')) return []
-  if (m.includes('over/under') && p === 'over 0.5') return []
-  if (m === '1x2' || (m.includes('1x2') && !m.includes('up'))) {
-    if (p === 'home' || p === '1') return [{ pick: 'Home/Draw', market: 'Double Chance' }, { pick: 'Home/Away', market: 'Double Chance' }]
-    if (p === 'away' || p === '2') return [{ pick: 'Draw/Away', market: 'Double Chance' }, { pick: 'Home/Away', market: 'Double Chance' }]
-    if (p === 'draw' || p === 'x') return [{ pick: 'Home/Draw', market: 'Double Chance' }, { pick: 'Draw/Away', market: 'Double Chance' }]
-  }
-  if (m.includes('over/under') && !m.includes('corner')) {
-    const num = parseFloat(p.replace(/[^0-9.]/g, ''))
-    if (p.startsWith('over') && !isNaN(num)) {
-      if (num >= 4.5) return [{ pick: 'Over 3.5', market: 'Over/Under' }, { pick: 'Over 2.5', market: 'Over/Under' }, { pick: 'Over 1.5', market: 'Over/Under' }]
-      if (num >= 3.5) return [{ pick: 'Over 2.5', market: 'Over/Under' }, { pick: 'Over 1.5', market: 'Over/Under' }]
-      if (num >= 2.5) return [{ pick: 'Over 1.5', market: 'Over/Under' }, { pick: 'Over 0.5', market: 'Over/Under' }]
-      if (num >= 1.5) return [{ pick: 'Over 0.5', market: 'Over/Under' }]
-    }
-  }
-  if (m.includes('gg') || m.includes('both teams')) {
-    if (p === 'yes' || p === 'gg') return [{ pick: 'No', market: 'GG/NG' }, { pick: 'Home/Draw', market: 'Double Chance' }, { pick: 'Draw/Away', market: 'Double Chance' }]
-  }
-  if (m.includes('2up')) {
-    if (p === 'home') return [{ pick: 'Home/Draw', market: 'Double Chance' }, { pick: 'Home', market: '1X2 - 1UP' }]
-    if (p === 'away') return [{ pick: 'Draw/Away', market: 'Double Chance' }, { pick: 'Away', market: '1X2 - 1UP' }]
-  }
-  if (m.includes('1up')) {
-    if (p === 'home') return [{ pick: 'Home/Draw', market: 'Double Chance' }, { pick: 'Home', market: '1X2' }]
-    if (p === 'away') return [{ pick: 'Draw/Away', market: 'Double Chance' }, { pick: 'Away', market: '1X2' }]
-  }
-  return []
-}
-
-// ─── AI DECISION ───────────────────────────────────────────────────────────
+// ─── AI ANALYSIS ──────────────────────────────────────────────────────────
 interface AIDecision {
   eventId: string
   keep: boolean
@@ -481,49 +366,66 @@ interface AIDecision {
   replacementReason: string | null
 }
 
-function buildAIPrompt(games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string }>, allowSwitching: boolean): string {
+function buildAIPrompt(
+  games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string; liveMarkets: AvailableMarket[] }>,
+  allowSwitching: boolean
+): string {
   const gameLines = games.map((gd, i) => {
-    const validOpts = getValidReplacements(gd.game.market, gd.game.pick)
-    const optsStr = validOpts.map(o => `"${o.pick}" (${o.market})`).join(', ') || 'none'
-    const stats = gd.bsd.hasData ? gd.bsd.raw : (gd.sofa || 'No stats available')
+    const stats = gd.bsd.hasData ? gd.bsd.raw : (gd.sofa || 'No stats')
+
+    // Build available safe options from LIVE SportyBet market data
+    // This is the key — we use real SportyBet picks, not hardcoded guesses
+    let saferOptions = 'No live market data — use best judgment'
+    if (gd.liveMarkets.length > 0) {
+      const safePicks: string[] = []
+      for (const m of gd.liveMarkets) {
+        const md = m.desc.toLowerCase()
+        if (md.includes('corner') || md.includes('card') || md.includes('half') || md.includes('player')) continue
+        for (const o of m.outcomes) {
+          if (o.odds >= gd.game.odds) continue
+          if (o.odds <= 1.03) continue
+          const oDesc = o.desc.toLowerCase()
+          if (oDesc.startsWith('over')) {
+            const num = parseFloat(oDesc.replace(/[^0-9.]/g, ''))
+            if (!isNaN(num) && num >= 2.5) continue
+          }
+          safePicks.push(`"${o.desc}" (${m.desc}) @${o.odds}`)
+          if (safePicks.length >= 5) break
+        }
+        if (safePicks.length >= 5) break
+      }
+      saferOptions = safePicks.length > 0 ? safePicks.join(', ') : 'No safer options found in live data'
+    }
+
     return `G${i + 1}|${gd.game.eventId}
 Match: ${gd.game.homeTeam} vs ${gd.game.awayTeam} | ${gd.game.league}
 Pick: ${gd.game.pick} (${gd.game.market}) @ ${gd.game.odds}
 Pre-analysis: ${gd.preReason}
 Stats: ${stats}
-Valid safer options: ${optsStr}`
+Available safer picks from SportyBet: ${saferOptions}`
   }).join('\n\n')
 
-  return `You are an elite football analyst for Groove Slip — a Nigerian betting tool. Protect users from losing tickets.
+  return `You are an elite football analyst for Groove Slip. Protect users from losing tickets.
 
-CRITICAL RULES:
-- Analyse every game using the actual stats — not generic rules
-- Even a 1.05 odds pick can kill a ticket — flag it if data shows risk (e.g. H2H avg 0.8 goals on Over 0.5)
-- KEEP only if data STRONGLY supports the pick (probability ≥ 60%, form matches, H2H agrees)
-- ${allowSwitching ? 'REPLACE with smartest option from valid options — must reference actual stats in replacementReason' : 'Only decide keep/remove — set replacePick and replaceMarket to null'}
-- replacePick and replaceMarket must be EXACTLY as written in valid options list
-- reason and replacementReason must reference specific stats — never generic
+${allowSwitching
+  ? `REPLACE MODE — MANDATORY RULES:
+1. Read the actual stats carefully for each game
+2. If stats STRONGLY support the current pick (prob ≥ 65%, form matches, H2H agrees) → KEEP it
+3. Otherwise → choose the SMARTEST pick from "Available safer picks from SportyBet"
+4. replacePick and replaceMarket must be EXACTLY as shown in the available picks list
+5. Do NOT always default to Over 0.5 — if home team is strong, Home/Draw may be smarter
+6. Consider: team form, H2H, prediction probability, goal averages
+7. Give specific stats-based replacementReason — never generic
+8. If no safer pick available → keep original`
+  : `REMOVE MODE — decide keep/remove based on stats. Set replacePick/replaceMarket to null.`}
 
 ${gameLines}
 
 Return ONLY a JSON array:
-[{"eventId":"ID","keep":true,"riskLevel":"MEDIUM","confidenceScore":65,"reason":"specific stat reason","formSummary":"key stat","replacePick":null,"replaceMarket":null,"replacementReason":null}]`
+[{"eventId":"ID","keep":true,"riskLevel":"MEDIUM","confidenceScore":68,"reason":"specific stat reason","formSummary":"key stat","replacePick":"Home/Draw","replaceMarket":"Double Chance","replacementReason":"specific data-based reason"}]`
 }
 
-async function callClaude(games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string }>, allowSwitching: boolean): Promise<AIDecision[]> {
-  const prompt = buildAIPrompt(games, allowSwitching)
-  const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 280 * games.length,
-    messages: [{ role: 'user', content: prompt }],
-    system: 'You are a JSON API. Output ONLY a valid JSON array. No markdown.',
-  })
-  const raw = response.content.filter((b: { type: string; text?: string }) => b.type === 'text').map((b: { type: string; text?: string }) => b.text || '').join('')
-  await trackTokens('claude', response.usage.input_tokens + response.usage.output_tokens)
-  return parseAIResponse(raw)
-}
-
-async function callGroq(games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string }>, allowSwitching: boolean): Promise<AIDecision[]> {
+async function callGroq(games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string; liveMarkets: AvailableMarket[] }>, allowSwitching: boolean): Promise<AIDecision[]> {
   const prompt = buildAIPrompt(games, allowSwitching)
   const completion = await groq.chat.completions.create({
     model: 'llama-3.1-8b-instant',
@@ -539,6 +441,19 @@ async function callGroq(games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: 
   return parseAIResponse(raw)
 }
 
+async function callClaude(games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string; liveMarkets: AvailableMarket[] }>, allowSwitching: boolean): Promise<AIDecision[]> {
+  const prompt = buildAIPrompt(games, allowSwitching)
+  const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 280 * games.length,
+    messages: [{ role: 'user', content: prompt }],
+    system: 'You are a JSON API. Output ONLY a valid JSON array. No markdown.',
+  })
+  const raw = response.content.filter((b: { type: string; text?: string }) => b.type === 'text').map((b: { type: string; text?: string }) => b.text || '').join('')
+  await trackTokens('claude', response.usage.input_tokens + response.usage.output_tokens)
+  return parseAIResponse(raw)
+}
+
 function parseAIResponse(raw: string): AIDecision[] {
   try {
     const clean = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
@@ -549,65 +464,47 @@ function parseAIResponse(raw: string): AIDecision[] {
 }
 
 async function getAIDecisions(
-  games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string }>,
+  games: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string; liveMarkets: AvailableMarket[] }>,
   allowSwitching: boolean
 ): Promise<Map<string, AIDecision>> {
   const map = new Map<string, AIDecision>()
   if (games.length === 0) return map
-
   let results: AIDecision[] = []
   try {
     results = PRIMARY_AI === 'claude' ? await callClaude(games, allowSwitching) : await callGroq(games, allowSwitching)
   } catch (primaryErr) {
-    console.error(`[AI] ${PRIMARY_AI} failed, trying ${FALLBACK_AI}:`, primaryErr)
+    console.error(`[AI] ${PRIMARY_AI} failed:`, primaryErr)
     try {
       results = FALLBACK_AI === 'claude' ? await callClaude(games, allowSwitching) : await callGroq(games, allowSwitching)
     } catch {
+      // Both failed — use pre-filter suggestions
       for (const gd of games) {
-        const validOpts = getValidReplacements(gd.game.market, gd.game.pick)
         map.set(gd.game.eventId, {
           eventId: gd.game.eventId, keep: true, riskLevel: 'MEDIUM', confidenceScore: 50,
           reason: gd.preReason, formSummary: '',
-          replacePick: allowSwitching && validOpts.length > 0 ? validOpts[0].pick : null,
-          replaceMarket: allowSwitching && validOpts.length > 0 ? validOpts[0].market : null,
-          replacementReason: 'Safer alternative selected automatically',
+          replacePick: null, replaceMarket: null, replacementReason: null,
         })
       }
       return map
     }
   }
-
   for (const r of results) {
-    if (!r.eventId) continue
-    const gd = games.find(g => g.game.eventId === r.eventId)
-    if (gd && r.replacePick && r.replaceMarket) {
-      const validOpts = getValidReplacements(gd.game.market, gd.game.pick)
-      const isValid = validOpts.some(o =>
-        o.pick.toLowerCase() === r.replacePick!.toLowerCase() &&
-        o.market.toLowerCase() === r.replaceMarket!.toLowerCase()
-      )
-      if (!isValid && validOpts.length > 0) { r.replacePick = validOpts[0].pick; r.replaceMarket = validOpts[0].market }
-      else if (!isValid) { r.replacePick = null; r.replaceMarket = null }
-    }
-    map.set(r.eventId, r)
+    if (r.eventId) map.set(r.eventId, r)
   }
-
+  // Fill missing
   for (const gd of games) {
     if (!map.has(gd.game.eventId)) {
-      const validOpts = getValidReplacements(gd.game.market, gd.game.pick)
       map.set(gd.game.eventId, {
         eventId: gd.game.eventId, keep: true, riskLevel: 'MEDIUM', confidenceScore: 52,
         reason: gd.preReason, formSummary: '',
-        replacePick: allowSwitching && validOpts.length > 0 ? validOpts[0].pick : null,
-        replaceMarket: allowSwitching && validOpts.length > 0 ? validOpts[0].market : null,
-        replacementReason: null,
+        replacePick: null, replaceMarket: null, replacementReason: null,
       })
     }
   }
   return map
 }
 
-// ─── HARDCODED IDs ─────────────────────────────────────────────────────────
+// ─── HARDCODED IDs FALLBACK ────────────────────────────────────────────────
 const PICK_TO_IDS: Record<string, { marketId: string; outcomeId: string }> = {
   'home/draw|double chance': { marketId: '3', outcomeId: '1' },
   'draw/away|double chance': { marketId: '3', outcomeId: '3' },
@@ -620,14 +517,9 @@ const PICK_TO_IDS: Record<string, { marketId: string; outcomeId: string }> = {
   'over 3.5|over/under': { marketId: '18', outcomeId: '12' },
   'under 1.5|over/under': { marketId: '18', outcomeId: '13' },
   'under 2.5|over/under': { marketId: '18', outcomeId: '13' },
-  'under 3.5|over/under': { marketId: '18', outcomeId: '13' },
   'home|1x2': { marketId: '1', outcomeId: '1' },
   'draw|1x2': { marketId: '1', outcomeId: '2' },
   'away|1x2': { marketId: '1', outcomeId: '3' },
-  'home|1x2 - 1up': { marketId: '60200', outcomeId: '1' },
-  'away|1x2 - 1up': { marketId: '60200', outcomeId: '3' },
-  'home|1x2 - 2up': { marketId: '60100', outcomeId: '1' },
-  'away|1x2 - 2up': { marketId: '60100', outcomeId: '3' },
 }
 
 function hardcodedIds(pick: string, market: string): { marketId: string; outcomeId: string } | null {
@@ -672,49 +564,6 @@ function estimateSaferOdds(originalOdds: number, newPick: string, newMarket: str
   return Math.max(1.08, parseFloat((1 + (originalOdds - 1) * 0.45).toFixed(2)))
 }
 
-async function resolveRealIdsFromProxy(eventId: string, targetPick: string, targetMarket: string): Promise<{ marketId: string; outcomeId: string; realOdds: number } | null> {
-  try {
-    const res = await withTimeout(
-      fetch(`${PROXY_URL}/markets/${eventId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
-        body: JSON.stringify({}),
-      }),
-      8000, null as unknown as Response
-    )
-    if (!res || !res.ok) return null
-    const data = await res.json()
-    if (!data.success || !data.markets) return null
-    const tm = targetMarket.toLowerCase().trim()
-    const tp = targetPick.toLowerCase().trim()
-    const market = data.markets.find((m: { id: string; desc: string; outcomes: Array<{ id: string; desc: string; odds: number }> }) => {
-      const d = m.desc.toLowerCase().trim()
-      return d === tm || d.includes(tm) || tm.includes(d) ||
-        (tm.includes('double chance') && d.includes('double chance')) ||
-        (tm === 'gg/ng' && (d.includes('gg') || d.includes('both teams'))) ||
-        (tm.includes('over/under') && d.includes('over/under') && !d.includes('corner'))
-    })
-    if (!market) return null
-    const outcome = market.outcomes.find((o: { id: string; desc: string; odds: number }) => {
-      const d = o.desc.toLowerCase().trim()
-      if (tp.startsWith('over') || tp.startsWith('under')) {
-        const tNum = parseFloat(tp.replace(/[^0-9.]/g, ''))
-        const dNum = parseFloat(d.replace(/[^0-9.]/g, ''))
-        const dir = tp.startsWith('over') ? 'over' : 'under'
-        if (!isNaN(tNum) && !isNaN(dNum)) return d.startsWith(dir) && Math.abs(dNum - tNum) < 0.1
-      }
-      if (tp === 'home/draw') return d === 'home/draw' || d === '1x' || (d.includes('home') && d.includes('draw'))
-      if (tp === 'draw/away') return d === 'draw/away' || d === 'x2' || (d.includes('draw') && d.includes('away'))
-      if (tp === 'home/away') return d === 'home/away' || d === '12'
-      if (tp === 'yes' || tp === 'gg') return d === 'yes' || d === 'gg'
-      if (tp === 'no' || tp === 'ng') return d === 'no' || d === 'ng'
-      return d === tp || d.includes(tp)
-    })
-    if (!outcome) return null
-    return { marketId: market.id, outcomeId: outcome.id, realOdds: outcome.odds }
-  } catch { return null }
-}
-
 function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAnalysis[] {
   if (games.length === 0) return games
   const total = games.reduce((acc, g) => acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
@@ -735,7 +584,7 @@ function findBestCombination(games: GameAnalysis[], targetOdds: number): GameAna
 
 async function generateSummary(username: string, totalGames: number, keptCount: number, removedCount: number, replacedCount: number, newOdds: number, targetOdds: number): Promise<string> {
   const fallback = `Hi ${username}, checked ${totalGames} games and kept ${keptCount} solid ones at ${newOdds.toFixed(2)} odds (target: ${targetOdds}). Cut ${removedCount} risky picks${replacedCount > 0 ? ` and swapped ${replacedCount} for safer options` : ''} — your slip is cleaner now.`
-  const userMsg = `Write EXACTLY 2 sentences. First sentence starts with "Hi ${username}," then mentions games kept and odds. Second sentence mentions cuts and swaps if any. Casual Nigerian punter tone. No team names, no markdown, no asterisks, no lists. STOP after 2 sentences.\n\nFacts: ${totalGames} checked, ${keptCount} kept at ${newOdds.toFixed(2)} odds, target ${targetOdds}, cut ${removedCount}${replacedCount > 0 ? `, swapped ${replacedCount}` : ''}.`
+  const userMsg = `Write EXACTLY 2 sentences. First starts with "Hi ${username}," then mentions games kept and odds. Second mentions cuts and swaps. Casual Nigerian punter tone. No team names, no markdown, no asterisks. STOP after 2 sentences.\n\nFacts: ${totalGames} checked, ${keptCount} kept at ${newOdds.toFixed(2)} odds, target ${targetOdds}, cut ${removedCount}${replacedCount > 0 ? `, swapped ${replacedCount}` : ''}.`
   try {
     if (PRIMARY_AI === 'claude') {
       const response = await anthropic.messages.create({
@@ -750,7 +599,7 @@ async function generateSummary(username: string, totalGames: number, keptCount: 
       const sc = await groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         messages: [
-          { role: 'system', content: 'Write 2-sentence betting summaries. Casual Nigerian punter tone. No team names, no markdown, no asterisks. HARD LIMIT: 2 sentences only.' },
+          { role: 'system', content: 'Write 2-sentence betting summaries. Casual Nigerian punter tone. No team names, no markdown. HARD LIMIT: 2 sentences only.' },
           { role: 'user', content: userMsg }
         ],
         temperature: 0.5, max_tokens: 80,
@@ -774,44 +623,47 @@ export async function analyseSlip(
   const isFootball = (g: SportyBetGame) =>
     !g.sport || g.sport.toLowerCase().includes('football') || g.sport.toLowerCase().includes('soccer')
 
-  // PHASE 1A: Fetch BSD + Sofascore data for all games in parallel
-  const dataMap = new Map<string, GameData>()
-  await Promise.all(
-    games.filter(isFootball).map(async (g) => {
-      const [bsd, sofa] = await Promise.all([
-        getBSDData(g.homeTeam, g.awayTeam),
-        getSofaData(g.homeTeam, g.awayTeam),
-      ])
-      dataMap.set(g.eventId, {
-        bsd, sofaRaw: sofa,
-        dataSource: bsd.hasData && sofa ? 'BSD+SOFASCORE' : bsd.hasData ? 'BSD' : sofa ? 'SOFASCORE' : 'AI_WEB_SEARCH',
+  // PHASE 1: Fetch BSD + Sofascore + Live Markets ALL in parallel
+  const [dataMapResult, liveMarketsMap] = await Promise.all([
+    // BSD + Sofascore for all football games
+    Promise.all(
+      games.filter(isFootball).map(async (g) => {
+        const [bsd, sofa] = await Promise.all([getBSDData(g.homeTeam, g.awayTeam), getSofaData(g.homeTeam, g.awayTeam)])
+        return { eventId: g.eventId, bsd, sofaRaw: sofa, dataSource: bsd.hasData && sofa ? 'BSD+SOFASCORE' : bsd.hasData ? 'BSD' : sofa ? 'SOFASCORE' : 'AI_WEB_SEARCH' }
       })
-    })
-  )
+    ).then(results => {
+      const map = new Map<string, GameData>()
+      results.forEach(r => map.set(r.eventId, r))
+      return map
+    }),
+    // Live markets from Cloudflare Worker (always fetch — used for both replacement and booking)
+    fetchLiveMarketsForEvents(games),
+  ])
 
-  // PHASE 1B: Fetch ALL live markets from SportyBet via Cloudflare Worker
-  // This runs in parallel with BSD/Sofascore fetch above
-  // Gives us real marketId/outcomeId for every pick including replacements
-  let liveMarketsMap = new Map<string, AvailableMarket[]>()
-  if (allowSwitching) {
-    liveMarketsMap = await fetchLiveMarketsForEvents(games)
-    console.log('[analyseSlip] live markets fetched for', liveMarketsMap.size, 'of', games.length, 'games')
-  }
+  const dataMap = dataMapResult
+  console.log('[analyseSlip] live markets fetched for', liveMarketsMap.size, 'of', games.length, 'games')
+  console.log('[analyseSlip] allowSwitching:', allowSwitching)
 
-  // PHASE 2: Smart pre-filter using actual data — zero AI tokens
+  // PHASE 2: Smart pre-filter using BSD data — zero AI tokens
   const preResults = new Map<string, PreFilterResult>()
-  const needsAI: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string }> = []
+  const needsAI: Array<{ game: SportyBetGame; bsd: BSDData; sofa: string; preReason: string; liveMarkets: AvailableMarket[] }> = []
 
   for (const game of games) {
     const d = dataMap.get(game.eventId) || { bsd: emptyBSD(), sofaRaw: '', dataSource: 'AI_WEB_SEARCH' }
     const pre = smartPreFilter(game, d.bsd, allowSwitching)
     preResults.set(game.eventId, pre)
     if (pre.decision === 'ai') {
-      needsAI.push({ game, bsd: d.bsd, sofa: d.sofaRaw, preReason: pre.reason })
+      needsAI.push({
+        game,
+        bsd: d.bsd,
+        sofa: d.sofaRaw,
+        preReason: pre.reason,
+        liveMarkets: liveMarketsMap.get(game.eventId) || [],
+      })
     }
   }
 
-  // PHASE 3: Single AI call for genuinely unclear games only
+  // PHASE 3: AI for unclear games only — gets live market data for smart replacement
   const aiDecisions = await getAIDecisions(needsAI, allowSwitching)
 
   // PHASE 4: Build final analysis
@@ -819,9 +671,10 @@ export async function analyseSlip(
     const d = dataMap.get(game.eventId) || { bsd: emptyBSD(), sofaRaw: '', dataSource: 'AI_WEB_SEARCH' }
     const pre = preResults.get(game.eventId)!
     const ai = aiDecisions.get(game.eventId)
+    const liveMarkets = liveMarketsMap.get(game.eventId) || game.availableMarkets || []
 
     let finalKeep = true
-    let finalReplacement: { pick: string; market: string; reason: string } | null = null
+    let finalReplacement: { pick: string; market: string; reason: string; marketId?: string; outcomeId?: string; odds?: number } | null = null
     let finalConfidence = pre.confidence
     let finalReason = pre.reason
     let finalRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW'
@@ -832,17 +685,52 @@ export async function analyseSlip(
     } else if (pre.decision === 'replace' && pre.suggestedPick && pre.suggestedMarket) {
       finalKeep = true
       finalRiskLevel = 'HIGH'
-      finalReplacement = { pick: pre.suggestedPick, market: pre.suggestedMarket, reason: pre.reason }
+      // Use live markets to find real replacement pick
+      const safest = findSafestPickFromMarkets(liveMarkets, game.marketId, game.outcomeId, game.odds)
+      if (safest) {
+        finalReplacement = { pick: safest.pick, market: safest.market, reason: pre.reason, marketId: safest.marketId, outcomeId: safest.outcomeId, odds: safest.odds }
+      } else {
+        finalReplacement = { pick: pre.suggestedPick, market: pre.suggestedMarket, reason: pre.reason }
+      }
     } else if (pre.decision === 'keep') {
       finalKeep = true
       finalRiskLevel = pre.confidence >= 70 ? 'LOW' : 'MEDIUM'
     } else if (pre.decision === 'ai' && ai) {
       finalKeep = ai.keep
-      finalRiskLevel = ai.riskLevel || 'MEDIUM'
+      finalRiskLevel = (['LOW','MEDIUM','HIGH'].includes(ai.riskLevel) ? ai.riskLevel : 'MEDIUM') as 'LOW'|'MEDIUM'|'HIGH'
       finalConfidence = ai.confidenceScore || pre.confidence
       finalReason = ai.reason || pre.reason
-      if (ai.replacePick && ai.replaceMarket) {
-        finalReplacement = { pick: ai.replacePick, market: ai.replaceMarket, reason: ai.replacementReason || pre.reason }
+
+      if (allowSwitching && ai.replacePick && ai.replaceMarket) {
+        // Find the exact market/outcome from live data matching AI's pick suggestion
+        const aiPick = ai.replacePick.toLowerCase()
+        const aiMarket = ai.replaceMarket.toLowerCase()
+        let foundInLive: { marketId: string; outcomeId: string; odds: number } | null = null
+
+        for (const m of liveMarkets) {
+          const md = m.desc.toLowerCase()
+          if (!md.includes(aiMarket) && !aiMarket.includes(md)) continue
+          for (const o of m.outcomes) {
+            const od = o.desc.toLowerCase()
+            if (od === aiPick || od.includes(aiPick) || aiPick.includes(od)) {
+              foundInLive = { marketId: m.id, outcomeId: o.id, odds: o.odds }
+              break
+            }
+          }
+          if (foundInLive) break
+        }
+
+        if (foundInLive) {
+          finalReplacement = { pick: ai.replacePick, market: ai.replaceMarket, reason: ai.replacementReason || pre.reason, marketId: foundInLive.marketId, outcomeId: foundInLive.outcomeId, odds: foundInLive.odds }
+        } else {
+          // Fall back to findSafestPickFromMarkets if AI pick not found in live data
+          const safest = findSafestPickFromMarkets(liveMarkets, game.marketId, game.outcomeId, game.odds)
+          if (safest) {
+            finalReplacement = { pick: safest.pick, market: safest.market, reason: ai.replacementReason || pre.reason, marketId: safest.marketId, outcomeId: safest.outcomeId, odds: safest.odds }
+          } else {
+            finalReplacement = { pick: ai.replacePick, market: ai.replaceMarket, reason: ai.replacementReason || pre.reason }
+          }
+        }
       }
     }
 
@@ -857,32 +745,17 @@ export async function analyseSlip(
       dataSource: d.dataSource,
     }
 
+    // Apply replacement
     if (allowSwitching && finalReplacement && finalKeep) {
-      // Use live markets from Cloudflare Worker — real SportyBet data
-      const liveMarkets = liveMarketsMap.get(game.eventId) || game.availableMarkets || []
+      // Priority: live market ID > hardcoded fallback > smart replacement
+      const resolvedMarketId = finalReplacement.marketId ||
+        hardcodedIds(finalReplacement.pick, finalReplacement.market)?.marketId ||
+        getSmartReplacement(game.marketId, game.outcomeId, game.pick, game.market, game.odds)?.marketId
 
-      // Find safest pick from real live market data
-      const safest = liveMarkets.length
-        ? findSafestPickFromMarkets(liveMarkets, game.marketId, game.outcomeId, game.odds)
-        : null
-
-      const finalPick = safest?.pick || finalReplacement.pick
-      const finalMarket = safest?.market || finalReplacement.market
-      const finalMarketId = safest?.marketId || null
-      const finalOutcomeId = safest?.outcomeId || null
-      const finalOdds = safest?.odds || estimateSaferOdds(game.odds, finalPick, finalMarket)
-
-      // Fallback to hardcoded IDs if no live data
-      const fallbackIds = !finalMarketId ? (
-        hardcodedIds(finalPick, finalMarket) ||
-        getSmartReplacement(game.marketId, game.outcomeId, game.pick, game.market, game.odds) ||
-        (liveMarkets.length
-          ? (() => { const r = resolveFromAvailableMarkets(liveMarkets, finalPick, finalMarket, game.odds); return r ? { marketId: r.marketId, outcomeId: r.outcomeId } : null })()
-          : null)
-      ) : null
-
-      const resolvedMarketId = finalMarketId || fallbackIds?.marketId
-      const resolvedOutcomeId = finalOutcomeId || fallbackIds?.outcomeId
+      const resolvedOutcomeId = finalReplacement.outcomeId ||
+        hardcodedIds(finalReplacement.pick, finalReplacement.market)?.outcomeId ||
+        getSmartReplacement(game.marketId, game.outcomeId, game.pick, game.market, game.odds)?.outcomeId ||
+        (() => { const r = resolveFromAvailableMarkets(liveMarkets, finalReplacement!.pick, finalReplacement!.market, game.odds); return r?.outcomeId })()
 
       if (resolvedMarketId && resolvedOutcomeId) {
         return {
@@ -892,12 +765,10 @@ export async function analyseSlip(
           originalPick: game.pick,
           originalMarket: game.market,
           originalOdds: game.odds,
-          replacedPick: finalPick,
-          replacedMarketDesc: finalMarket,
-          replacedOdds: finalOdds,
-          replacementReason: safest
-            ? `Safest available: ${finalPick} (${finalMarket}) @ ${finalOdds} — verified from SportyBet live data`
-            : finalReplacement.reason,
+          replacedPick: finalReplacement.pick,
+          replacedMarketDesc: finalReplacement.market,
+          replacedOdds: finalReplacement.odds || estimateSaferOdds(game.odds, finalReplacement.pick, finalReplacement.market),
+          replacementReason: finalReplacement.reason,
           marketId: resolvedMarketId,
           outcomeId: resolvedOutcomeId,
           specifier: null,
@@ -917,16 +788,13 @@ export async function analyseSlip(
     for (const g of safest) { if (keptGames.length >= 2) break; keptGames.push(g) }
   }
 
-  // PHASE 5: Real IDs already resolved from live markets in Phase 1B + 4
-  // No additional proxy calls needed
-  const replacedGames = keptGames.filter(g => g.replaced)
-  console.log('[analyseSlip] replaced games:', replacedGames.length)
-
   const keptIds = new Set(keptGames.map(g => g.eventId))
   const finalGames = analysisResults.map(g => ({ ...g, keep: keptIds.has(g.eventId) }))
   const removedGames = finalGames.filter(g => !g.keep)
   const replacedCount = keptGames.filter(g => g.replaced).length
   const finalNewOdds = keptGames.reduce((acc, g) => acc * (g.replaced ? (g.replacedOdds || g.odds) : g.odds), 1)
+
+  console.log('[analyseSlip] replaced games:', replacedCount)
 
   const summary = await generateSummary(username, games.length, keptGames.length, removedGames.length, replacedCount, finalNewOdds, targetOdds)
 
