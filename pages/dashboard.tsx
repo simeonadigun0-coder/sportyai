@@ -238,7 +238,6 @@ export default function Dashboard() {
   const freeTrialAvailable = !freeAnalysisUsed && !isAdmin
   const canAnalyse = subscriptionActive || isAdmin || freeTrialAvailable
   if (!canAnalyse) { setShowPayment(true); return }
-  if (allowSwitching === null) { setError('Please choose what to do with risky picks'); return }
   const target = parseFloat(targetOdds)
   if (!target || target < 1) { setError('Enter valid target odds'); return }
 
@@ -251,7 +250,7 @@ export default function Dashboard() {
         games: slip.games,
         targetOdds: target,
         originalTotalOdds: slip.totalOdds,
-        allowSwitching,
+        allowSwitching: false,
         clientMarkets: {},
       }),
     })
@@ -528,31 +527,10 @@ export default function Dashboard() {
               </div>
 
               {/* Consent */}
-              <div style={{ background: '#fff', border: '2px solid #1a3d1e', borderRadius: 14, padding: '16px', marginBottom: 12 }}>
-                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, color: '#0f2010' }}>🤔 When I find a risky pick, what should I do?</div>
-                <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12, lineHeight: 1.5 }}>This affects how risky games are handled.</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {[
-                    { value: false, icon: '🗑️', title: 'Remove the game', desc: 'Remove risky picks entirely from the slip' },
-                    { value: true, icon: '🔄', title: 'Replace with safer pick', desc: 'Swap risky pick for a safer option on same match' },
-                  ].map(opt => (
-                    <button key={String(opt.value)}
-                      onClick={() => setAllowSwitching(opt.value)}
-                      style={{
-                        padding: '12px 14px', borderRadius: 10, fontSize: 13,
-                        textAlign: 'left', cursor: 'pointer',
-                        background: allowSwitching === opt.value ? (opt.value ? '#f0faf0' : '#fef2f2') : '#f8faf8',
-                        border: allowSwitching === opt.value
-                          ? `2px solid ${opt.value ? '#16a34a' : '#dc2626'}`
-                          : '1.5px solid #e8ede8',
-                        color: '#0f2010',
-                      }}>
-                      <div style={{ fontWeight: 700, marginBottom: 2 }}>{opt.icon} {opt.title}</div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>{opt.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+<div style={{ background: '#fff', border: '2px solid #1a3d1e', borderRadius: 14, padding: '16px', marginBottom: 12 }}>
+  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, color: '#0f2010' }}>Bad picks will be removed entirely</div>
+  <div style={{ fontSize: 13, color: '#64748b' }}>Bad picks will be removed entirely from your slip automatically.</div>
+</div>
 
               {/* Target Odds */}
               <div style={{ background: '#fff', border: '2px solid #16a34a', borderRadius: 14, padding: '16px' }}>
@@ -573,13 +551,11 @@ export default function Dashboard() {
                     style={{ background: '#f8faf8', border: '1.5px solid #e8ede8', borderRadius: 9, padding: '12px 14px', fontSize: 14, color: '#0f2010' }}
                     required />
                   {error && <div style={{ color: '#dc2626', fontSize: 13 }}>⚠ {error}</div>}
-                  <button type="submit" disabled={loading || allowSwitching === null}
-                    style={{ padding: '14px', background: (loading || allowSwitching === null) ? '#94a3b8' : '#1a3d1e', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (loading || allowSwitching === null) ? 'not-allowed' : 'pointer' }}>
+                  <button type="submit" disabled={loading}
+                    style={{ padding: '14px', background: loading ? '#94a3b8' : '#1a3d1e', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (loading || allowSwitching === null) ? 'not-allowed' : 'pointer' }}>
                     {loading ? '⏳ Analysing...' : !canAnalyse ? '🔒 Subscribe to Analyse' : freeTrialAvailable ? '🎁 Analyse Free' : '🤖 Analyse & Clean Slip'}
                   </button>
-                  {allowSwitching === null && (
-                    <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>↑ Choose what to do with risky picks first</div>
-                  )}
+              
                 </form>
               </div>
             </div>
@@ -811,11 +787,18 @@ export default function Dashboard() {
             <span style={{ fontSize: 20 }}>⚡</span>
             Analyse
           </button>
-          <button onClick={() => router.push('/history')}
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
-            <span style={{ fontSize: 20 }}>📋</span>
-            History
-          </button>
+          <button style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3d1e', fontSize: 10, fontWeight: 700 }}>
+  <span style={{ fontSize: 20 }}>⚡</span>Analyse
+</button>
+<button onClick={() => router.push('/value-bets')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
+  <span style={{ fontSize: 20 }}>💎</span>Value Bets
+</button>
+<button onClick={() => router.push('/builder')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
+  <span style={{ fontSize: 20 }}>🏗️</span>Builder
+</button>
+<button onClick={() => router.push('/history')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
+  <span style={{ fontSize: 20 }}>📋</span>History
+</button>
         </div>
         </main>
 
