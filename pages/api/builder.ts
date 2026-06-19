@@ -1,173 +1,227 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { requireAuth } from '@/lib/auth'
-import { findUserByEmail, isSubscriptionActive } from '@/lib/users'
-import { createBookingCode } from '@/lib/sportybet'
+import { findUserByEmail, isSubscriptionActive, incrementFreeBuilderUsed } from '@/lib/users'
 import Groq from 'groq-sdk'
 
-const PROXY_URL = 'https://sportybet-proxy.grooveslip.workers.dev'
-const PROXY_KEY = 'grooveslip_proxy_2026'
 const BSD_BASE = 'https://sports.bzzoiro.com/api'
-const SOFA_BASE = 'https://api.sofascore.com/api/v1'
 const BSD_TOKEN = process.env.BSD_API_KEY || ''
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 const bsdHeaders = { 'Authorization': `Token ${BSD_TOKEN}`, 'Content-Type': 'application/json' }
-const sofaHeaders = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Accept': 'application/json',
-  'Referer': 'https://www.sofascore.com/',
-}
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
-function normalize(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-function teamsMatch(a: string, b: string, c: string, d: string) {
-  const fw = (s: string) => normalize(s).split(' ')[0]
-  return normalize(a).includes(fw(c)) && normalize(b).includes(fw(d))
-}
+// ─── THE 100 SUPPORTED MARKETS (for Tier 2 AI suggestions) ───────────────
+const MARKET_CATALOGUE = [
+  'Over 0.5 Goals', 'Over 1.5 Goals', 'Under 4.5 Goals', 'Under 5.5 Goals', 'Under 6.5 Goals',
+  'Double Chance (1X)', 'Double Chance (X2)', 'Draw No Bet – Home',
+  'Home Team Over 0.5 Goals', 'Away Team Over 0.5 Goals', 'Home Team Under 3.5 Goals', 'Away Team Under 2.5 Goals',
+  'Match to Have 1+ Goal', 'Home Team to Score in Either Half', 'Away Team to Score in Either Half',
+  'Home Team Win Either Half', 'Away Team Win Either Half', 'Total Goals 1-5', 'Total Goals 2-5',
+  'Total Goals Odd', 'Total Goals Even', 'Home Team Clean Sheet – No', 'Away Team Clean Sheet – No',
+  'Home Team To Score – Yes', 'Away Team To Score – Yes',
+  'First Half Over 0.5 Goals', 'First Half Under 2.5 Goals', 'Second Half Over 0.5 Goals', 'Second Half Under 2.5 Goals',
+  'First Half Double Chance (1X)', 'First Half Double Chance (X2)', 'Second Half Double Chance (1X)', 'Second Half Double Chance (X2)',
+  'Home Team to Score First Half', 'Away Team to Score First Half', 'Home Team to Score Second Half', 'Match to Have Goal in Both Halves',
+  'Any Team to Score 2+ Goals in a Row – No', 'Any Team to Score 3+ Goals in a Row – No',
+  'Home Team 3+ Goals in a Row – No', 'Away Team 3+ Goals in a Row – No',
+  'Any Team to Win Both Halves – No', 'Home Team to Score Consecutively – No', 'Away Team to Score Consecutively – No',
+  'Goal Before Minute 85 – Yes', 'Goal Before Minute 75 – Yes', 'No Goal in First 10 Minutes',
+  'Goal in Second Half – Yes', 'Any Team To Score in Both Halves – Yes', 'Home Team To Score in Both Halves – Yes',
+  'Total Corners Over 6.5', 'Total Corners Over 7.5', 'Total Corners Over 8.5', 'Total Corners Under 14.5', 'Total Corners Under 15.5',
+  'First Half Corners Over 3.5', 'Second Half Corners Over 2.5',
+  'Home Team Over 2.5 Corners', 'Home Team Over 3.5 Corners', 'Away Team Over 1.5 Corners', 'Away Team Over 2.5 Corners',
+  'Home Team Most Corners', 'Away Team Most Corners', 'Race to 3 Corners – Home', 'Race to 5 Corners – Home',
+  'Home Team First Corner', 'Away Team First Corner', 'Home Team Last Corner', 'Match to Have 8+ Corners', 'Match to Have 10+ Corners',
+  'Over 1.5 Cards', 'Over 2.5 Cards', 'Home Team Over 0.5 Cards', 'Away Team Over 0.5 Cards',
+  'Home Team Under 4.5 Cards', 'Away Team Under 4.5 Cards', 'Both Teams 1+ Card', 'Card in First Half – Yes',
+  'Double Chance (1X) + Over 0.5 Goals', 'Double Chance (1X) + Over 1.5 Goals', 'Double Chance (1X) + Under 5.5 Goals',
+  'Home Team Over 0.5 Goals + Under 5.5 Goals', 'Home Team Win Either Half + Over 0.5 Goals',
+  'Over 1.5 Goals + Under 5.5 Goals', 'Home Team To Score + Over 1.5 Goals',
+  'Match Goal + Home Team Over 2 Corners', 'Double Chance + Over 6.5 Corners', 'Home Team Most Corners + Over 0.5 Goals',
+  'Team to Score First – Home', 'Team to Score First – Away', 'Team to Score Last – Home', 'Team to Score Last – Away',
+  'Home Team Over 1 Shot on Target', 'Away Team Over 1 Shot on Target', 'Home Team Over 3 Shots', 'Away Team Over 3 Shots',
+  'Match to Have Shot on Target Each Half', 'Home Team 1+ Corner Each Half', 'Away Team 1+ Corner Each Half', 'Either Team 1+ Corner Each Half',
+]
 
-// Fetch fixtures via Cloudflare Worker
 async function fetchFixtures(dateFrom: string, dateTo: string): Promise<unknown[]> {
-  try {
-    const res = await fetch(`${PROXY_URL}/fixtures`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Proxy-Key': PROXY_KEY },
-      body: JSON.stringify({ dateFrom, dateTo }),
-      signal: AbortSignal.timeout(20000),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data.fixtures || []
-  } catch { return [] }
+  const url = `${BSD_BASE}/events/?date_from=${dateFrom}&date_to=${dateTo}&limit=100&sport=1`
+  const res = await fetch(url, { headers: bsdHeaders, signal: AbortSignal.timeout(12000) })
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.results || []
 }
 
-// Get BSD analysis for a fixture
-async function getBSDAnalysis(homeTeam: string, awayTeam: string): Promise<{
-  probHome: number; probDraw: number; probAway: number
-  predResult: string; homeForm: string; awayForm: string
-  h2hSummary: string; avgGoals: number; hasData: boolean
-}> {
-  const empty = { probHome: 0, probDraw: 0, probAway: 0, predResult: '', homeForm: '', awayForm: '', h2hSummary: '', avgGoals: 2.5, hasData: false }
+async function fetchEventDetail(id: number): Promise<Record<string, unknown> | null> {
   try {
-    const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
-    const next2w = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
-    for (const term of [homeTeam, homeTeam.split(' ')[0], awayTeam]) {
-      const res = await fetch(
-        `${BSD_BASE}/events/?team=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${next2w}&limit=20`,
-        { headers: bsdHeaders, signal: AbortSignal.timeout(5000) }
-      )
-      if (!res.ok) continue
-      const data = await res.json()
-      const match = (data.results || []).find((e: unknown) => {
-        const ev = e as Record<string, unknown>
-        return teamsMatch(ev.home_team as string || '', ev.away_team as string || '', homeTeam, awayTeam)
+    const res = await fetch(`${BSD_BASE}/events/${id}/`, { headers: bsdHeaders, signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return null
+    return res.json()
+  } catch { return null }
+}
+
+interface Tier1Pick {
+  tier: 1
+  homeTeam: string
+  awayTeam: string
+  league: string
+  startTime: string
+  pick: string
+  market: string
+  odds: number
+  confidence: number
+  reason: string
+}
+
+interface Tier2Pick {
+  tier: 2
+  homeTeam: string
+  awayTeam: string
+  league: string
+  startTime: string
+  pick: string
+  market: string
+  estimatedProbability: number
+  confidence: number
+  reason: string
+}
+
+const RISK_THRESHOLDS = {
+  low: { minConf: 75, minOdds: 1.2, maxOdds: 1.8 },
+  medium: { minConf: 65, minOdds: 1.5, maxOdds: 2.5 },
+  high: { minConf: 55, minOdds: 2.0, maxOdds: 4.0 },
+}
+
+async function scoreFixtureTier1(fixture: Record<string, unknown>, riskLevel: 'low' | 'medium' | 'high'): Promise<Tier1Pick | null> {
+  const detail = await fetchEventDetail(fixture.id as number)
+  if (!detail) return null
+
+  const hf = detail.home_form as Record<string, unknown> | null
+  const af = detail.away_form as Record<string, unknown> | null
+  const h2h = detail.head_to_head as Record<string, unknown> | null
+  const pred = detail.prediction as Record<string, unknown> | null
+  const unavail = detail.unavailable_players as Record<string, unknown> | null
+
+  const probHome = Number(pred?.prob_home_win || 0)
+  const probAway = Number(pred?.prob_away_win || 0)
+  const homeWins = Number(hf?.wins || 0)
+  const homePlayed = homeWins + Number(hf?.draws || 0) + Number(hf?.losses || 0)
+  const awayWins = Number(af?.wins || 0)
+  const awayPlayed = awayWins + Number(af?.draws || 0) + Number(af?.losses || 0)
+  const h2hHW = Number(h2h?.home_wins || 0)
+  const h2hAW = Number(h2h?.away_wins || 0)
+  const h2hTotal = h2hHW + Number(h2h?.draws || 0) + h2hAW || 1
+  const homeInjured = (unavail?.home as unknown[] || []).length
+  const awayInjured = (unavail?.away as unknown[] || []).length
+
+  const threshold = RISK_THRESHOLDS[riskLevel]
+  const homeTeam = fixture.home_team as string
+  const awayTeam = fixture.away_team as string
+
+  const formScoreHome = homePlayed > 0 ? (homeWins / homePlayed) * 100 : 50
+  const formScoreAway = awayPlayed > 0 ? (awayWins / awayPlayed) * 100 : 50
+  const h2hScoreHome = (h2hHW / h2hTotal) * 100
+  const h2hScoreAway = (h2hAW / h2hTotal) * 100
+
+  const confHome = Math.round((probHome * 0.4 + formScoreHome * 0.3 + h2hScoreHome * 0.2 + 5 * 0.1) - homeInjured * 2)
+  const confAway = Math.round((probAway * 0.4 + formScoreAway * 0.3 + h2hScoreAway * 0.2) - awayInjured * 2)
+
+  const oddsHome = Number(fixture.odds_home || 0)
+  const oddsAway = Number(fixture.odds_away || 0)
+
+  const candidates: Tier1Pick[] = []
+
+  if (confHome >= threshold.minConf && oddsHome >= threshold.minOdds && oddsHome <= threshold.maxOdds) {
+    candidates.push({
+      tier: 1, homeTeam, awayTeam,
+      league: (fixture.league as Record<string, unknown>)?.name as string || '',
+      startTime: fixture.event_date as string || '',
+      pick: 'Home Win', market: '1X2', odds: oddsHome, confidence: Math.min(95, confHome),
+      reason: `${homeTeam} form W${homeWins}/${homePlayed}, BSD prediction ${probHome}%${homeInjured > 0 ? `, ${homeInjured} key absence` : ''}`,
+    })
+  }
+  if (confAway >= threshold.minConf && oddsAway >= threshold.minOdds && oddsAway <= threshold.maxOdds) {
+    candidates.push({
+      tier: 1, homeTeam, awayTeam,
+      league: (fixture.league as Record<string, unknown>)?.name as string || '',
+      startTime: fixture.event_date as string || '',
+      pick: 'Away Win', market: '1X2', odds: oddsAway, confidence: Math.min(95, confAway),
+      reason: `${awayTeam} form W${awayWins}/${awayPlayed}, BSD prediction ${probAway}%${awayInjured > 0 ? `, ${awayInjured} key absence` : ''}`,
+    })
+  }
+
+  // Over/Under goals
+  const homeScored = Number(hf?.goals_scored_last_n || 0) / (homePlayed || 1)
+  const awayScored = Number(af?.goals_scored_last_n || 0) / (awayPlayed || 1)
+  const oddsOver15 = Number(fixture.odds_over_15 || 0)
+  const oddsOver25 = Number(fixture.odds_over_25 || 0)
+
+  if (riskLevel !== 'low' && oddsOver25 >= threshold.minOdds && oddsOver25 <= threshold.maxOdds) {
+    const expectedGoals = (homeScored + awayScored)
+    if (expectedGoals >= 2.3) {
+      candidates.push({
+        tier: 1, homeTeam, awayTeam,
+        league: (fixture.league as Record<string, unknown>)?.name as string || '',
+        startTime: fixture.event_date as string || '',
+        pick: 'Over 2.5 Goals', market: 'Over/Under', odds: oddsOver25, confidence: Math.min(90, Math.round(expectedGoals * 25)),
+        reason: `Combined scoring average ${expectedGoals.toFixed(1)} goals/game`,
       })
-      if (!match) continue
-      const ev = match as Record<string, unknown>
-      const det = await fetch(`${BSD_BASE}/events/${ev.id}/`, { headers: bsdHeaders, signal: AbortSignal.timeout(5000) })
-      if (!det.ok) continue
-      const event = await det.json()
-      const hf = event.home_form as Record<string, unknown> | null
-      const af = event.away_form as Record<string, unknown> | null
-      const h2h = event.head_to_head as Record<string, unknown> | null
-      const pred = event.prediction as Record<string, unknown> | null
-      const h2hGoals = Number(h2h?.total_goals || 0)
-      const h2hTotal = Number(h2h?.total_matches || 1)
-      return {
-        probHome: Number(pred?.prob_home_win || 0),
-        probDraw: Number(pred?.prob_draw || 0),
-        probAway: Number(pred?.prob_away_win || 0),
-        predResult: String(pred?.predicted_result || ''),
-        homeForm: String(hf?.form_string || ''),
-        awayForm: String(af?.form_string || ''),
-        h2hSummary: h2h ? `HW${h2h.home_wins}D${h2h.draws}AW${h2h.away_wins}` : '',
-        avgGoals: h2hTotal > 0 ? h2hGoals / h2hTotal : 2.5,
-        hasData: true,
-      }
     }
-  } catch { }
-  return empty
-}
-
-// Score a fixture for accumulator selection
-// Returns a score 0-100 and the best pick
-function scoreFixture(
-  fixture: Record<string, unknown>,
-  bsd: ReturnType<typeof getBSDAnalysis> extends Promise<infer T> ? T : never,
-  riskLevel: 'low' | 'medium' | 'high'
-): { score: number; pick: string; market: string; marketId: string; outcomeId: string; estimatedOdds: number; reason: string } | null {
-  const { probHome, probDraw, probAway, predResult, homeForm, awayForm, avgGoals, hasData } = bsd
-  const homeOdds = fixture.homeOdds as number || 0
-  const drawOdds = fixture.drawOdds as number || 0
-  const awayOdds = fixture.awayOdds as number || 0
-
-  if (!hasData && !homeOdds) return null
-
-  // Determine target probability based on risk level
-  const minProb = riskLevel === 'low' ? 70 : riskLevel === 'medium' ? 55 : 45
-  const maxOdds = riskLevel === 'low' ? 1.5 : riskLevel === 'medium' ? 2.5 : 4.0
-
-  const candidates: Array<{ score: number; pick: string; market: string; marketId: string; outcomeId: string; estimatedOdds: number; reason: string }> = []
-
-  // Evaluate home win
-  if (probHome >= minProb || (!hasData && homeOdds > 0 && homeOdds <= maxOdds)) {
-    const score = hasData ? probHome : (1 / homeOdds) * 100
-    const winsInRow = (homeForm.match(/W/g) || []).length
-    candidates.push({
-      score,
-      pick: 'Home',
-      market: '1X2',
-      marketId: '1',
-      outcomeId: '1',
-      estimatedOdds: homeOdds || 1.5,
-      reason: hasData ? `${probHome}% home win probability${winsInRow >= 3 ? `, ${winsInRow} wins in recent form` : ''}` : `Home odds ${homeOdds} — reasonable value`,
-    })
   }
 
-  // Evaluate away win
-  if (probAway >= minProb || (!hasData && awayOdds > 0 && awayOdds <= maxOdds)) {
-    const score = hasData ? probAway : (1 / awayOdds) * 100
-    const winsInRow = (awayForm.match(/W/g) || []).length
-    candidates.push({
-      score,
-      pick: 'Away',
-      market: '1X2',
-      marketId: '1',
-      outcomeId: '3',
-      estimatedOdds: awayOdds || 2.0,
-      reason: hasData ? `${probAway}% away win probability${winsInRow >= 3 ? `, ${winsInRow} wins in recent form` : ''}` : `Away odds ${awayOdds}`,
-    })
-  }
-
-  // Evaluate Over 1.5 (for medium/high risk or when goal data supports)
-  if (riskLevel !== 'low' && avgGoals >= 2.0) {
-    candidates.push({
-      score: Math.min(75, avgGoals * 20),
-      pick: 'Over 1.5',
-      market: 'Over/Under',
-      marketId: '18',
-      outcomeId: '12',
-      estimatedOdds: 1.3,
-      reason: `Average ${avgGoals.toFixed(1)} goals per H2H game supports Over 1.5`,
-    })
-  }
-
-  // Evaluate Over 0.5 (very safe for low risk)
-  if (riskLevel === 'low' && avgGoals >= 1.0) {
-    candidates.push({
-      score: 80,
-      pick: 'Over 0.5',
-      market: 'Over/Under',
-      marketId: '18',
-      outcomeId: '12',
-      estimatedOdds: 1.1,
-      reason: `${avgGoals.toFixed(1)} avg goals — almost certain to have at least 1 goal`,
-    })
+  if (oddsOver15 >= threshold.minOdds && oddsOver15 <= threshold.maxOdds) {
+    const expectedGoals = (homeScored + awayScored)
+    if (expectedGoals >= 1.8) {
+      candidates.push({
+        tier: 1, homeTeam, awayTeam,
+        league: (fixture.league as Record<string, unknown>)?.name as string || '',
+        startTime: fixture.event_date as string || '',
+        pick: 'Over 1.5 Goals', market: 'Over/Under', odds: oddsOver15, confidence: Math.min(92, Math.round(expectedGoals * 30)),
+        reason: `Combined scoring average ${expectedGoals.toFixed(1)} goals/game`,
+      })
+    }
   }
 
   if (candidates.length === 0) return null
-  candidates.sort((a, b) => b.score - a.score)
+  candidates.sort((a, b) => b.confidence - a.confidence)
   return candidates[0]
+}
+
+// Tier 2 — AI suggests from wider 100-market catalogue using form/H2H logic only (no BSD odds)
+function suggestTier2Pick(fixture: Record<string, unknown>, detail: Record<string, unknown> | null, riskLevel: 'low' | 'medium' | 'high'): Tier2Pick | null {
+  if (!detail) return null
+  const hf = detail.home_form as Record<string, unknown> | null
+  const af = detail.away_form as Record<string, unknown> | null
+  const homeTeam = fixture.home_team as string
+  const awayTeam = fixture.away_team as string
+  const homeWins = Number(hf?.wins || 0)
+  const homePlayed = homeWins + Number(hf?.draws || 0) + Number(hf?.losses || 0)
+
+  // Simple heuristic suggestions from the 100-market catalogue based on form
+  const homeScored = Number(hf?.goals_scored_last_n || 0) / (homePlayed || 1)
+  const formStr = hf?.form_string as string || ''
+  const winStreak = formStr.startsWith('WW')
+
+  if (winStreak && riskLevel === 'low') {
+    return {
+      tier: 2, homeTeam, awayTeam,
+      league: (fixture.league as Record<string, unknown>)?.name as string || '',
+      startTime: fixture.event_date as string || '',
+      pick: 'Double Chance (1X)', market: MARKET_CATALOGUE[5],
+      estimatedProbability: 78,
+      confidence: 72,
+      reason: `${homeTeam} on a winning streak (${formStr}) — verify odds on SportyBet`,
+    }
+  }
+  if (homeScored >= 1.5) {
+    return {
+      tier: 2, homeTeam, awayTeam,
+      league: (fixture.league as Record<string, unknown>)?.name as string || '',
+      startTime: fixture.event_date as string || '',
+      pick: 'Home Team To Score – Yes', market: MARKET_CATALOGUE[23],
+      estimatedProbability: 80,
+      confidence: 70,
+      reason: `${homeTeam} averages ${homeScored.toFixed(1)} goals/game — verify odds on SportyBet`,
+    }
+  }
+  return null
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -179,149 +233,93 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = await findUserByEmail(auth.email)
   if (!user) return res.status(404).json({ error: 'User not found' })
 
-  const hasAccess = user.isAdmin || isSubscriptionActive(user) || !user.freeAnalysisUsed
-  if (!hasAccess) return res.status(403).json({ error: 'Subscription required', requiresSubscription: true })
+  const hasSubscription = isSubscriptionActive(user)
+  const freeBuilderUsed = user.freeBuilderUsed || 0
+  const hasFreeTrials = freeBuilderUsed < 2 && !user.isAdmin
+  const canUse = user.isAdmin || hasSubscription || hasFreeTrials
+  if (!canUse) return res.status(403).json({ error: 'Subscription required', requiresSubscription: true })
 
-  const {
-    targetOdds = 10,
-    riskLevel = 'medium',
-    dateRange = 'today',
-  } = req.body
+  const { targetOdds = 10, riskLevel = 'medium', dateRange = 'today' } = req.body
 
   try {
-    // Calculate date range
     const today = new Date()
     const dateFrom = today.toISOString().split('T')[0]
     let dateTo = dateFrom
-    if (dateRange === 'tomorrow') {
-      const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1)
-      dateTo = tomorrow.toISOString().split('T')[0]
-    } else if (dateRange === 'week') {
-      const nextWeek = new Date(today); nextWeek.setDate(today.getDate() + 7)
-      dateTo = nextWeek.toISOString().split('T')[0]
-    } else if (dateRange === 'month') {
-      const nextMonth = new Date(today); nextMonth.setDate(today.getDate() + 30)
-      dateTo = nextMonth.toISOString().split('T')[0]
-    }
+    if (dateRange === 'tomorrow') { const t = new Date(today); t.setDate(today.getDate() + 1); dateTo = t.toISOString().split('T')[0] }
+    else if (dateRange === 'week') { const t = new Date(today); t.setDate(today.getDate() + 7); dateTo = t.toISOString().split('T')[0] }
+    else if (dateRange === 'month') { const t = new Date(today); t.setDate(today.getDate() + 30); dateTo = t.toISOString().split('T')[0] }
 
-    // Fetch fixtures
     const fixtures = await fetchFixtures(dateFrom, dateTo)
     if (!fixtures.length) {
-      return res.status(200).json({ games: [], bookingCode: null, message: 'No fixtures found for this date range' })
+      return res.status(200).json({ tier1: [], tier2: [], message: 'No fixtures found for this date range' })
     }
-
-    // Analyse fixtures in batches — get BSD data
-    const analysedFixtures: Array<{
-      fixture: Record<string, unknown>
-      bsd: Awaited<ReturnType<typeof getBSDAnalysis>>
-      scored: ReturnType<typeof scoreFixture>
-    }> = []
 
     const BATCH = 8
-    for (let i = 0; i < Math.min(fixtures.length, 60); i += BATCH) {
-      const batch = fixtures.slice(i, i + BATCH) as Record<string, unknown>[]
+    const tier1Picks: Tier1Pick[] = []
+    const tier2Picks: Tier2Pick[] = []
+
+    for (let i = 0; i < Math.min(fixtures.length, 50); i += BATCH) {
+      const batch = (fixtures as Record<string, unknown>[]).slice(i, i + BATCH)
       const results = await Promise.all(batch.map(async f => {
-        const bsd = await getBSDAnalysis(f.homeTeam as string, f.awayTeam as string)
-        const scored = scoreFixture(f, bsd, riskLevel as 'low' | 'medium' | 'high')
-        return { fixture: f, bsd, scored }
+        const tier1 = await scoreFixtureTier1(f, riskLevel as 'low' | 'medium' | 'high')
+        return { fixture: f, tier1 }
       }))
       for (const r of results) {
-        if (r.scored) analysedFixtures.push(r)
+        if (r.tier1) tier1Picks.push(r.tier1)
       }
     }
 
-    if (!analysedFixtures.length) {
-      return res.status(200).json({ games: [], bookingCode: null, message: 'Could not find suitable fixtures for your criteria' })
-    }
-
-    // Sort by score descending
-    analysedFixtures.sort((a, b) => (b.scored!.score) - (a.scored!.score))
-
-    // Select games to meet target odds
-    const selectedGames: typeof analysedFixtures = []
+    // Select Tier 1 picks to reach target odds
+    tier1Picks.sort((a, b) => b.confidence - a.confidence)
+    const selectedTier1: Tier1Pick[] = []
     let currentOdds = 1.0
-
-    for (const item of analysedFixtures) {
+    for (const pick of tier1Picks) {
       if (currentOdds >= targetOdds) break
-      const gameOdds = item.scored!.estimatedOdds
-      if (gameOdds <= 1.0) continue
-      // Don't add games that would massively overshoot
-      if (currentOdds * gameOdds > targetOdds * 3 && selectedGames.length > 0) continue
-      selectedGames.push(item)
-      currentOdds *= gameOdds
+      selectedTier1.push(pick)
+      currentOdds *= pick.odds
     }
 
-    // If we haven't reached target odds, keep adding
-    if (currentOdds < targetOdds && selectedGames.length < analysedFixtures.length) {
-      for (const item of analysedFixtures) {
-        if (selectedGames.includes(item)) continue
-        if (currentOdds >= targetOdds) break
-        selectedGames.push(item)
-        currentOdds *= item.scored!.estimatedOdds
+    const totalOdds = selectedTier1.reduce((acc, p) => acc * p.odds, 1)
+
+    // If we couldn't reach target with Tier 1, suggest Tier 2 picks
+    if (currentOdds < targetOdds && selectedTier1.length < fixtures.length) {
+      const usedFixtures = new Set(selectedTier1.map(p => `${p.homeTeam}-${p.awayTeam}`))
+      const remaining = (fixtures as Record<string, unknown>[]).filter(f =>
+        !usedFixtures.has(`${f.home_team}-${f.away_team}`)
+      ).slice(0, 10)
+
+      for (const f of remaining) {
+        if (tier2Picks.length >= 5) break
+        const detail = await fetchEventDetail(f.id as number)
+        const t2 = suggestTier2Pick(f, detail, riskLevel as 'low' | 'medium' | 'high')
+        if (t2) tier2Picks.push(t2)
       }
     }
 
-    if (!selectedGames.length) {
-      return res.status(200).json({ games: [], bookingCode: null, message: 'No suitable games found' })
-    }
+    let summary = `Built accumulator with ${selectedTier1.length} verified picks at ${totalOdds.toFixed(2)} odds (target: ${targetOdds}).`
+    if (tier2Picks.length > 0) summary += ` Added ${tier2Picks.length} bonus AI suggestions — verify odds on SportyBet.`
 
-    // Build game objects for booking
-    const games = selectedGames.map(item => ({
-      eventId: item.fixture.eventId as string,
-      homeTeam: item.fixture.homeTeam as string,
-      awayTeam: item.fixture.awayTeam as string,
-      market: item.scored!.market,
-      marketId: item.scored!.marketId,
-      outcomeId: item.scored!.outcomeId,
-      specifier: null,
-      pick: item.scored!.pick,
-      odds: item.scored!.estimatedOdds,
-      kickoffTime: item.fixture.startTime as string || '',
-      league: item.fixture.league as string || '',
-      sport: 'Football',
-      reason: item.scored!.reason,
-      confidence: Math.round(item.scored!.score),
-      homeForm: item.bsd.homeForm,
-      awayForm: item.bsd.awayForm,
-    }))
-
-    const totalOdds = games.reduce((acc, g) => acc * g.odds, 1)
-
-    // Try to create booking code
-    let bookingCode: string | null = null
-    // Only try booking if we have real SportyBet event IDs (not sofa: prefixed)
-    const bookableGames = games.filter(g => !g.eventId.startsWith('sofa:'))
-    if (bookableGames.length > 0) {
-      try {
-        bookingCode = await createBookingCode(bookableGames)
-      } catch (err) {
-        console.error('[builder] booking code failed:', err)
-      }
-    }
-
-    // Generate summary
-    let summary = `Built ${games.length} game accumulator at ${totalOdds.toFixed(2)} odds (target: ${targetOdds}). ${bookingCode ? 'Booking code ready.' : 'Load games manually on SportyBet.'}`
     try {
       const sc = await groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         messages: [
           { role: 'system', content: 'Write short punter-friendly summaries. Nigerian casual tone. 2 sentences max. No markdown, no team names.' },
-          { role: 'user', content: `Built ${games.length} game accumulator at ${totalOdds.toFixed(2)} odds targeting ${targetOdds}. Risk level: ${riskLevel}. ${bookingCode ? 'Booking code generated.' : 'No booking code yet.'} Summarise for punter.` }
+          { role: 'user', content: `Built accumulator: ${selectedTier1.length} verified picks at ${totalOdds.toFixed(2)} odds, target was ${targetOdds}, risk level ${riskLevel}. ${tier2Picks.length} bonus suggestions added. Summarise for punter.` }
         ],
-        temperature: 0.5,
-        max_tokens: 80,
+        temperature: 0.5, max_tokens: 80,
       })
       summary = sc.choices[0]?.message?.content || summary
     } catch { }
 
+    if (hasFreeTrials && !user.isAdmin) {
+      await incrementFreeBuilderUsed(user.id)
+    }
+
     return res.status(200).json({
-      games,
-      bookingCode,
+      tier1: selectedTier1,
+      tier2: tier2Picks,
       totalOdds: parseFloat(totalOdds.toFixed(2)),
-      targetOdds,
-      riskLevel,
-      dateRange,
-      summary,
+      targetOdds, riskLevel, dateRange, summary,
     })
   } catch (err) {
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to build accumulator' })

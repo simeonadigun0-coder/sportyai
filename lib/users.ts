@@ -14,7 +14,10 @@ export interface User {
   subscriptionWaived?: boolean
   subscriptionExpiry?: string | null
   freeAnalysisUsed?: boolean
+  freeValueBetsUsed?: number
+  freeBuilderUsed?: number
 }
+
 export async function findUserByEmail(email: string): Promise<User | undefined> {
   const user = await redis.get<User>(`user:email:${email.toLowerCase()}`)
   return user || undefined
@@ -131,6 +134,9 @@ export async function createUser(
     isAdmin,
     subscriptionWaived: isAdmin,
     subscriptionExpiry: null,
+    freeAnalysisUsed: false,
+    freeValueBetsUsed: 0,
+    freeBuilderUsed: 0,
   }
 
   await redis.set(`user:email:${email.toLowerCase()}`, user)
@@ -161,6 +167,7 @@ export async function getLastSeen(userId: string): Promise<string | null> {
     return await redis.get<string>(`user:lastseen:${userId}`)
   } catch { return null }
 }
+
 export async function markFreeAnalysisUsed(id: string): Promise<void> {
   let user = await findUserById(id)
   if (!user) {
@@ -170,6 +177,36 @@ export async function markFreeAnalysisUsed(id: string): Promise<void> {
   }
   if (!user) return
   const updated = { ...user, freeAnalysisUsed: true }
+  await redis.set(`user:id:${id}`, updated)
+  await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
+  await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
+}
+
+// ─── VALUE BETS FREE TRIAL TRACKING ───────────────────────────────────────
+export async function incrementFreeValueBetsUsed(id: string): Promise<void> {
+  let user = await findUserById(id)
+  if (!user) {
+    const emailKeys = await redis.keys('user:email:*')
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    user = users.find(u => u?.id === id) as User | undefined
+  }
+  if (!user) return
+  const updated = { ...user, freeValueBetsUsed: (user.freeValueBetsUsed || 0) + 1 }
+  await redis.set(`user:id:${id}`, updated)
+  await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
+  await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
+}
+
+// ─── BUILDER FREE TRIAL TRACKING ──────────────────────────────────────────
+export async function incrementFreeBuilderUsed(id: string): Promise<void> {
+  let user = await findUserById(id)
+  if (!user) {
+    const emailKeys = await redis.keys('user:email:*')
+    const users = await Promise.all(emailKeys.map(k => redis.get<User>(k)))
+    user = users.find(u => u?.id === id) as User | undefined
+  }
+  if (!user) return
+  const updated = { ...user, freeBuilderUsed: (user.freeBuilderUsed || 0) + 1 }
   await redis.set(`user:id:${id}`, updated)
   await redis.set(`user:email:${user.email.toLowerCase()}`, updated)
   await redis.set(`user:username:${user.username.toLowerCase()}`, updated)
