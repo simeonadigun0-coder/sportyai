@@ -64,7 +64,6 @@ export default function Dashboard() {
   const [step, setStep] = useState<Step>('input')
   const [code, setCode] = useState('')
   const [targetOdds, setTargetOdds] = useState('')
-  const [allowSwitching, setAllowSwitching] = useState<boolean | null>(null)
   const [slip, setSlip] = useState<{ shareCode: string; totalOdds: number; games: Game[] } | null>(null)
   const [analysis, setAnalysis] = useState<SlipAnalysis | null>(null)
   const [newCode, setNewCode] = useState('')
@@ -112,212 +111,100 @@ export default function Dashboard() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to decode')
       if (!data.games?.length) throw new Error('No games found')
-      setSlip(data); setAllowSwitching(null); setStep('decoded')
+      setSlip(data); setStep('decoded')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to decode')
     } finally { setLoading(false) }
   }
-  const resolveReplacementsClientSide = async (
-  replacedGames: GameAnalysis[]
-): Promise<Array<{ eventId: string; marketId: string; outcomeId: string; replacedOdds: number; needsResolution: false }>> => {
-  const results = []
 
-  for (const game of replacedGames) {
-    if (!game.replacedPick || !game.replacedMarketDesc) continue
+  const handleAnalyse = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!slip) return
+
+    const freeTrialAvailable = !freeAnalysisUsed && !isAdmin
+    const canAnalyse = subscriptionActive || isAdmin || freeTrialAvailable
+    if (!canAnalyse) { setShowPayment(true); return }
+
+    const target = parseFloat(targetOdds)
+    if (!target || target < 1) { setError('Enter valid target odds'); return }
+
+    setLoading(true); setError(''); setStep('analysing')
 
     try {
-      // Fetch real markets from SportyBet directly from browser
-      // Browser is NOT blocked by SportyBet (only Vercel server IPs are)
-      const payload = [
-        { eventId: game.eventId, marketId: '1', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '2', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '3', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '4', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '5', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '18', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '21', outcomeId: '1', specifier: null },
-        { eventId: game.eventId, marketId: '29', outcomeId: '1', specifier: null },
-      ]
-
-      const res = await fetch('https://www.sportybet.com/api/ng/factsCenter/Outcomes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': '*/*',
-          'Origin': 'https://www.sportybet.com',
-          'Referer': 'https://www.sportybet.com/ng/',
-          'Clientid': 'web',
-        },
-        body: JSON.stringify(payload),
+      const res = await fetch('/api/analyse', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({
+          games: slip.games,
+          targetOdds: target,
+          originalTotalOdds: slip.totalOdds,
+          allowSwitching: false,
+          clientMarkets: {},
+        }),
       })
-
-      if (!res.ok) continue
       const data = await res.json()
-      if (!data || data.bizCode !== 10000) continue
+      if (!res.ok) throw new Error(data.error)
 
-      // Build markets list from response
-      const marketsMap = new Map<string, { id: string; desc: string; outcomes: Array<{ id: string; desc: string; odds: number; isActive: boolean }> }>()
+      if (data.wasFreeTrial) {
+        localStorage.setItem('freeAnalysisUsed', 'true')
+        setFreeAnalysisUsed(true)
+      }
 
-      for (const ev of (data.data || [])) {
-        for (const m of (ev.markets || [])) {
-          if (!marketsMap.has(m.id)) {
-            marketsMap.set(m.id, {
-              id: m.id,
-              desc: m.desc || m.name || '',
-              outcomes: (m.outcomes || [])
-                .filter((o: { isActive: number | boolean }) => o.isActive === 1 || o.isActive === true)
-                .map((o: { id: string; desc: string; odds: string }) => ({
-                  id: o.id,
-                  desc: o.desc || '',
-                  odds: parseFloat(String(o.odds || 1)),
-                  isActive: true,
-                }))
-            })
-          }
+      setAnalysis(data)
+
+      let rebookCode = ''
+      if (data.keptGames?.length > 0) {
+        const rebookRes = await fetch('/api/rebook', {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ games: data.keptGames }),
+        })
+        const rebookData = await rebookRes.json()
+        if (rebookRes.ok && rebookData.code) {
+          rebookCode = rebookData.code
+          setNewCode(rebookData.code)
         }
       }
 
-      const allMarkets = Array.from(marketsMap.values())
-      const targetMarket = game.replacedMarketDesc!.toLowerCase()
-      const targetPick = game.replacedPick!.toLowerCase()
+      setStep('result')
+      if (data.wasFreeTrial) setShowFreeTrialPrompt(true)
 
-      // Find matching market
-      const market = allMarkets.find(m => {
-        const d = m.desc.toLowerCase()
-        return d === targetMarket || d.includes(targetMarket) || targetMarket.includes(d)
-      })
+      // Auto-save slip to history
+      if (data.keptGames?.length > 0) {
+        try {
+          await fetch('/api/slips/save', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+              bookingCode: rebookCode || 'N/A',
+              originalCode: slip?.shareCode || '',
+              originalOdds: data.originalOdds,
+              newOdds: data.newOdds,
+              targetOdds: target,
+              games: data.keptGames.map((g: GameAnalysis) => ({
+                eventId: g.eventId,
+                homeTeam: g.homeTeam,
+                awayTeam: g.awayTeam,
+                pick: g.replacedPick || g.pick,
+                market: g.replacedMarketDesc || g.market,
+                odds: g.replacedOdds || g.odds,
+                league: g.league,
+                kickoffTime: g.kickoffTime,
+                replaced: g.replaced || false,
+                originalPick: g.originalPick,
+                originalOdds: g.originalOdds,
+              })),
+              removedCount: data.removedGames?.length || 0,
+              replacedCount: data.keptGames?.filter((g: GameAnalysis) => g.replaced).length || 0,
+            }),
+          })
+        } catch { /* non-critical */ }
+      }
 
-      if (!market) continue
-
-      // Find matching outcome
-      const outcome = market.outcomes.find(o => {
-        const d = o.desc.toLowerCase()
-
-        // Numeric Over/Under match
-        if (targetPick.startsWith('over') || targetPick.startsWith('under')) {
-          const tNum = parseFloat(targetPick.replace(/[^0-9.]/g, ''))
-          const dNum = parseFloat(d.replace(/[^0-9.]/g, ''))
-          const dir = targetPick.startsWith('over') ? 'over' : 'under'
-          if (!isNaN(tNum) && !isNaN(dNum)) {
-            return d.startsWith(dir) && Math.abs(dNum - tNum) < 0.1
-          }
-        }
-
-        // Double Chance
-        if (targetPick === 'home/draw') return d === 'home/draw' || d === '1x' || d.includes('home') && d.includes('draw')
-        if (targetPick === 'draw/away') return d === 'draw/away' || d === 'x2' || d.includes('draw') && d.includes('away')
-        if (targetPick === 'home/away') return d === 'home/away' || d === '12'
-
-        return d === targetPick || d.includes(targetPick) || targetPick.includes(d)
-      })
-
-      if (!outcome) continue
-
-      // Only use if genuinely safer odds
-      if (outcome.odds >= (game.originalOdds || game.odds)) continue
-      if (outcome.odds <= 1.02) continue
-
-      results.push({
-        eventId: game.eventId,
-        marketId: market.id,
-        outcomeId: outcome.id,
-        replacedOdds: outcome.odds,
-        needsResolution: false as const,
-      })
-
-    } catch { continue }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Analysis failed')
+      setStep('decoded')
+    } finally { setLoading(false) }
   }
 
-  return results
-}
-
- const handleAnalyse = async (e: React.FormEvent) => {
-  e.preventDefault()
-  if (!slip) return
-
-  const freeTrialAvailable = !freeAnalysisUsed && !isAdmin
-  const canAnalyse = subscriptionActive || isAdmin || freeTrialAvailable
-  if (!canAnalyse) { setShowPayment(true); return }
-  const target = parseFloat(targetOdds)
-  if (!target || target < 1) { setError('Enter valid target odds'); return }
-
-  setLoading(true); setError(''); setStep('analysing')
-
-  try {
-    const res = await fetch('/api/analyse', {
-      method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({
-        games: slip.games,
-        targetOdds: target,
-        originalTotalOdds: slip.totalOdds,
-        allowSwitching: false,
-        clientMarkets: {},
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error)
-
-    if (data.wasFreeTrial) {
-      localStorage.setItem('freeAnalysisUsed', 'true')
-      setFreeAnalysisUsed(true)
-    }
-
-    setAnalysis(data)
-
-    // Generate booking code — replaced games now have real IDs from server
-    let rebookCode = ''
-    if (data.keptGames?.length > 0) {
-      const rebookRes = await fetch('/api/rebook', {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ games: data.keptGames }),
-      })
-      const rebookData = await rebookRes.json()
-      if (rebookRes.ok && rebookData.code) {
-        rebookCode = rebookData.code
-        setNewCode(rebookData.code)
-      }
-    }
-
-    setStep('result')
-    if (data.wasFreeTrial) setShowFreeTrialPrompt(true)
-
-    // Auto-save slip to history
-    if (data.keptGames?.length > 0) {
-      try {
-        await fetch('/api/slips/save', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            bookingCode: rebookCode || 'N/A',
-            originalCode: slip?.shareCode || '',
-            originalOdds: data.originalOdds,
-            newOdds: data.newOdds,
-            targetOdds: target,
-            games: data.keptGames.map((g: GameAnalysis) => ({
-              eventId: g.eventId,
-              homeTeam: g.homeTeam,
-              awayTeam: g.awayTeam,
-              pick: g.replacedPick || g.pick,
-              market: g.replacedMarketDesc || g.market,
-              odds: g.replacedOdds || g.odds,
-              league: g.league,
-              kickoffTime: g.kickoffTime,
-              replaced: g.replaced || false,
-              originalPick: g.originalPick,
-              originalOdds: g.originalOdds,
-            })),
-            removedCount: data.removedGames?.length || 0,
-            replacedCount: data.keptGames?.filter((g: GameAnalysis) => g.replaced).length || 0,
-          }),
-        })
-      } catch { /* non-critical */ }
-    }
-
-  } catch (err: unknown) {
-    setError(err instanceof Error ? err.message : 'Analysis failed')
-    setStep('decoded')
-  } finally { setLoading(false) }
-}
   const handlePayment = async () => {
     setPaymentLoading(true)
     try {
@@ -331,7 +218,7 @@ export default function Dashboard() {
   const reset = () => {
     setStep('input'); setCode(''); setTargetOdds('')
     setSlip(null); setAnalysis(null); setNewCode('')
-    setError(''); setCopied(false); setAllowSwitching(null)
+    setError(''); setCopied(false)
   }
 
   const logout = async () => {
@@ -416,7 +303,7 @@ export default function Dashboard() {
         )}
 
         {freeTrialAvailable && (
-          <div style={{ background: 'rgba(22,163,74,0.08)', border: '0', borderBottom: '1px solid rgba(22,163,74,0.15)', padding: '8px 16px', textAlign: 'center' }}>
+          <div style={{ background: 'rgba(22,163,74,0.08)', borderBottom: '1px solid rgba(22,163,74,0.15)', padding: '8px 16px', textAlign: 'center' }}>
             <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>
               🎁 You have 1 free analysis remaining — try it now!
             </span>
@@ -444,7 +331,7 @@ export default function Dashboard() {
                     <input type="text" placeholder="e.g. YQKP2M"
                       value={code}
                       onChange={e => setCode(e.target.value.toUpperCase())}
-                      style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 700, letterSpacing: '0.12em', textAlign: 'center', padding: '14px', background: '#f8faf8', border: '2px solid #e2e8e2', borderRadius: 10, color: '#0f2010' }}
+                      style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 700, letterSpacing: '0.12em', textAlign: 'center', padding: '14px', background: '#f8faf8', border: '2px solid #e2e8e2', borderRadius: 10, color: '#0f2010', width: '100%' }}
                       required />
                   </div>
                   {error && (
@@ -487,13 +374,14 @@ export default function Dashboard() {
             <div className="fade-up">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                 <button onClick={reset}
-                  style={{ background: '#fff', border: '1px solid #e2e8e2', color: '#475569', borderRadius: 8, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>← Back</button>
+                  style={{ background: '#fff', border: '1px solid #e2e8e2', color: '#475569', borderRadius: 8, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  ← Back
+                </button>
                 <div style={{ background: '#1a3d1e', borderRadius: 8, padding: '5px 12px' }}>
                   <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: '#4ade80' }}>{slip.shareCode}</span>
                 </div>
               </div>
 
-              {/* Stats */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
                 {[
                   { label: 'GAMES', value: slip.games.length, color: '#1a3d1e' },
@@ -507,7 +395,6 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              {/* Games */}
               <div style={{ background: '#fff', borderRadius: 14, padding: '16px', marginBottom: 12, border: '1px solid #e8ede8' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.05em', marginBottom: 10 }}>ALL GAMES ({slip.games.length})</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -526,13 +413,12 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Consent */}
-<div style={{ background: '#fff', border: '2px solid #1a3d1e', borderRadius: 14, padding: '16px', marginBottom: 12 }}>
-  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, color: '#0f2010' }}>Bad picks will be removed entirely</div>
-  <div style={{ fontSize: 13, color: '#64748b' }}>Bad picks will be removed entirely from your slip automatically.</div>
-</div>
+              <div style={{ background: '#f0faf0', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: '#1a3d1e', fontWeight: 600 }}>
+                  🗑️ Bad picks will be removed automatically based on real match data
+                </div>
+              </div>
 
-              {/* Target Odds */}
               <div style={{ background: '#fff', border: '2px solid #16a34a', borderRadius: 14, padding: '16px' }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: '#0f2010' }}>Set Target Odds</div>
                 <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>AI will aim to land close to your target</div>
@@ -548,14 +434,13 @@ export default function Dashboard() {
                   <input type="number" placeholder="Or type any number e.g. 3000"
                     value={targetOdds} onChange={e => setTargetOdds(e.target.value)}
                     min={1} step="any"
-                    style={{ background: '#f8faf8', border: '1.5px solid #e8ede8', borderRadius: 9, padding: '12px 14px', fontSize: 14, color: '#0f2010' }}
+                    style={{ background: '#f8faf8', border: '1.5px solid #e8ede8', borderRadius: 9, padding: '12px 14px', fontSize: 14, color: '#0f2010', width: '100%' }}
                     required />
                   {error && <div style={{ color: '#dc2626', fontSize: 13 }}>⚠ {error}</div>}
                   <button type="submit" disabled={loading}
-                    style={{ padding: '14px', background: loading ? '#94a3b8' : '#1a3d1e', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (loading || allowSwitching === null) ? 'not-allowed' : 'pointer' }}>
+                    style={{ padding: '14px', background: loading ? '#94a3b8' : '#1a3d1e', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer' }}>
                     {loading ? '⏳ Analysing...' : !canAnalyse ? '🔒 Subscribe to Analyse' : freeTrialAvailable ? '🎁 Analyse Free' : '🤖 Analyse & Clean Slip'}
                   </button>
-              
                 </form>
               </div>
             </div>
@@ -566,11 +451,9 @@ export default function Dashboard() {
             <div className="fade-up" style={{ textAlign: 'center', padding: '60px 0' }}>
               <div style={{ width: 64, height: 64, borderRadius: 18, background: '#1a3d1e', border: '2px solid #4ade80', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 28 }}>🤖</div>
               <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 6, color: '#0f2010' }}>Deep Analysis Running</h3>
-              <p style={{ color: '#64748b', fontSize: 14, marginBottom: 28 }}>
-                {allowSwitching ? 'Finding safer alternatives...' : 'Identifying bad eggs...'}
-              </p>
+              <p style={{ color: '#64748b', fontSize: 14, marginBottom: 28 }}>Identifying bad eggs and cleaning your slip...</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 260, margin: '0 auto' }}>
-                {['Searching BSD database...', 'Checking Sofascore form...', 'Analysing H2H records...', allowSwitching ? 'Finding safer picks...' : 'Targeting desired odds...', 'Building clean slip...'].map(msg => (
+                {['Searching BSD database...', 'Checking Sofascore form...', 'Analysing H2H records...', 'Targeting desired odds...', 'Building clean slip...'].map(msg => (
                   <div key={msg} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8ede8' }}>
                     <span className="spinner" style={{ width: 14, height: 14 }} />
                     <span style={{ fontSize: 13, color: '#475569' }}>{msg}</span>
@@ -583,7 +466,6 @@ export default function Dashboard() {
           {/* STEP 4 — Results */}
           {step === 'result' && analysis && (
             <div className="fade-up">
-              {/* New Code */}
               {newCode ? (
                 <div style={{ background: 'linear-gradient(135deg,#1a3d1e,#15803d)', borderRadius: 18, padding: '20px', marginBottom: 14, textAlign: 'center' }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#4ade80', letterSpacing: '0.08em', marginBottom: 6 }}>✅ NEW BOOKING CODE</div>
@@ -606,7 +488,6 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* Stats */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 14 }}>
                 {[
                   { label: 'Original', value: analysis.originalOdds, color: '#64748b' },
@@ -621,20 +502,6 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              {/* Replaced count */}
-              {analysis.keptGames.filter(g => g.replaced).length > 0 && (
-                <div style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 16 }}>🔄</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#3b82f6' }}>
-                      {analysis.keptGames.filter(g => g.replaced).length} pick{analysis.keptGames.filter(g => g.replaced).length > 1 ? 's' : ''} swapped for safer options
-                    </div>
-                    <div style={{ fontSize: 11, color: '#64748b' }}>Look for the 🔄 badge below</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Summary */}
               <div style={{ background: '#fff', borderRadius: 12, padding: '12px 14px', marginBottom: 12, display: 'flex', gap: 10, border: '1px solid #e8ede8' }}>
                 <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
                 <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, margin: 0 }}>{analysis.summary}</p>
@@ -673,7 +540,6 @@ export default function Dashboard() {
                         </div>
                       </div>
 
-                      {/* Pick change */}
                       {g.replaced ? (
                         <div style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.12)', borderRadius: 9, padding: '10px 12px', marginBottom: 10 }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: '#6366f1', marginBottom: 6, letterSpacing: '0.04em' }}>PICK CHANGED TO SAFER OPTION</div>
@@ -696,7 +562,6 @@ export default function Dashboard() {
                         </div>
                       )}
 
-                      {/* Confidence bar */}
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                           <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>CONFIDENCE</span>
@@ -738,7 +603,6 @@ export default function Dashboard() {
                             <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: riskBg(g.riskLevel), color: riskColor(g.riskLevel) }}>{g.riskLevel}</span>
                           </div>
                         </div>
-
                         <div style={{ marginBottom: 6 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                             <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>CONFIDENCE</span>
@@ -748,7 +612,6 @@ export default function Dashboard() {
                             <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2 }} />
                           </div>
                         </div>
-
                         <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3 }}>{g.league} · {g.pick}</div>
                         <div style={{ fontSize: 12, color: '#dc2626', fontStyle: 'italic' }}>⚠ {g.reason}</div>
                       </div>
@@ -758,15 +621,11 @@ export default function Dashboard() {
               )}
 
               <button onClick={reset}
-                style={{ width: '100%', padding: '14px', background: '#1a3d1e', color: '#fff', border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                style={{ width: '100%', padding: '14px', background: '#1a3d1e', color: '#fff', border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>
                 Analyse Another Slip
               </button>
 
-              <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button onClick={() => router.push('/history')}
-                  style={{ width: '100%', padding: '12px', background: '#fff', color: '#1a3d1e', border: '1.5px solid #1a3d1e', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-                  📋 View Slip History
-                </button>
+              <div style={{ textAlign: 'center' }}>
                 <a href="https://wa.me/2349075520182" target="_blank" rel="noopener noreferrer"
                   style={{ fontSize: 13, color: '#25D366', textDecoration: 'none', fontWeight: 600 }}>
                   💬 Encounter a challenge? Contact Support
@@ -774,7 +633,9 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-          {/* Bottom Nav */}
+        </main>
+
+        {/* Bottom Nav */}
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0,
           background: '#fff', borderTop: '1px solid #e8ede8',
@@ -787,20 +648,17 @@ export default function Dashboard() {
             <span style={{ fontSize: 20 }}>⚡</span>
             Analyse
           </button>
-          <button style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3d1e', fontSize: 10, fontWeight: 700 }}>
-  <span style={{ fontSize: 20 }}>⚡</span>Analyse
-</button>
-<button onClick={() => router.push('/value-bets')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
-  <span style={{ fontSize: 20 }}>💎</span>Value Bets
-</button>
-<button onClick={() => router.push('/builder')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
-  <span style={{ fontSize: 20 }}>🏗️</span>Builder
-</button>
-<button onClick={() => router.push('/history')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
-  <span style={{ fontSize: 20 }}>📋</span>History
-</button>
+          <button onClick={() => router.push('/value-bets')}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
+            <span style={{ fontSize: 20 }}>💎</span>
+            Value Bets
+          </button>
+          <button onClick={() => router.push('/builder')}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
+            <span style={{ fontSize: 20 }}>🏗️</span>
+            Builder
+          </button>
         </div>
-        </main>
 
         {/* Payment Modal */}
         {showPayment && (
@@ -817,7 +675,7 @@ export default function Dashboard() {
                 <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>per month · Cancel anytime</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {['✅ Unlimited slip analyses', '✅ AI pick replacement', '✅ Real BSD + Sofascore data', '✅ Fresh booking codes instantly'].map(f => (
+                {['✅ Unlimited slip analyses', '✅ Value Bet Finder', '✅ Accumulator Builder', '✅ Real BSD + Sofascore data'].map(f => (
                   <div key={f} style={{ fontSize: 13, color: '#475569' }}>{f}</div>
                 ))}
               </div>
@@ -860,10 +718,4 @@ export default function Dashboard() {
       </div>
     </>
   )
-}
-
-async function resolveReplacementsClientSide(replacedGames: GameAnalysis[]): Promise<GameAnalysis[]> {
-  // Browser-side replacement resolution is not available yet.
-  // Return the input data so the merge step can continue safely.
-  return replacedGames
 }

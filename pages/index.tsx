@@ -42,6 +42,7 @@ export default function LandingPage() {
       <Head>
         <title>Groove Slip — Where Sharp Minds Meet Sharper Picks</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#0d1f0e" />
         <meta name="description" content="Bet slip analyser for SportyBet Nigeria. Remove bad eggs, replace risky picks, get smarter codes." />
       </Head>
 
@@ -97,6 +98,25 @@ export default function LandingPage() {
           <p style={{ fontSize: 12, color: '#475569', marginTop: 14 }}>
             No credit card required · 1 free analysis · ₦2,500/month after
           </p>
+        </section>
+
+        {/* WHAT YOU GET — new section from new landing page */}
+        <section style={{ padding: '0 24px 60px', maxWidth: 680, margin: '0 auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[
+              { icon: '⚡', title: 'Analyse Your Slip', desc: 'Paste your SportyBet code — AI removes the risky picks, keeps what the data supports' },
+              { icon: '💎', title: 'Value Bet of the Day', desc: 'Daily banker picks with 90%+ win probability, backed by form and H2H data' },
+              { icon: '🏗️', title: 'Build an Accumulator', desc: "Set your target odds — AI builds the slip from today's best fixtures" },
+            ].map(f => (
+              <div key={f.title} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(74,222,128,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{f.icon}</div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>{f.title}</div>
+                  <div style={{ color: '#9ca89c', fontSize: 12, marginTop: 1, lineHeight: 1.4 }}>{f.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* BEFORE/AFTER */}
@@ -193,8 +213,8 @@ export default function LandingPage() {
               { icon: '📊', title: 'Real Match Data', desc: 'BSD and Sofascore databases with live form, H2H and injury reports' },
               { icon: '🔄', title: 'Smart Replacements', desc: 'Risky picks swapped for safer alternatives — Over 2.5 becomes Over 1.5' },
               { icon: '🗑️', title: 'Bad Egg Removal', desc: 'Games with poor form, injuries or bad H2H removed automatically' },
-              { icon: '⚡', title: 'Instant New Code', desc: 'Fresh SportyBet booking code generated in seconds' },
-              { icon: '🎯', title: 'Target Odds', desc: 'Set your desired odds — we edit the slip to match as closely as possible' },
+              { icon: '💎', title: 'Value Bet Finder', desc: 'Daily high-confidence picks backed by real probability data' },
+              { icon: '🏗️', title: 'Accumulator Builder', desc: "Set target odds — AI builds the best slip from today's fixtures" },
               { icon: '📱', title: 'Works on Phone', desc: 'Mobile-first design, install as app, works on any Android or iPhone' },
             ].map(f => (
               <div key={f.title} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '18px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
@@ -227,6 +247,8 @@ export default function LandingPage() {
                   'Smart pick replacement',
                   'Real-time match data',
                   'Fresh booking codes',
+                  'Value Bet Finder',
+                  'Accumulator Builder',
                   'Win/loss tracking',
                   'Priority support',
                 ].map(f => (
@@ -296,47 +318,47 @@ export default function LandingPage() {
               </div>
 
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {showAuth === 'register' && (
-                    <div>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>USERNAME</label>
-                      <input type="text" placeholder="e.g. punter_king"
-                        value={form.username}
-                        onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '12px 14px', fontSize: 14, width: '100%', outline: 'none' }}
-                        required />
-                    </div>
-                  )}
+                {showAuth === 'register' && (
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>EMAIL</label>
-                    <input type="email" placeholder="your@email.com"
-                      value={form.email}
-                      onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>USERNAME</label>
+                    <input type="text" placeholder="e.g. punter_king"
+                      value={form.username}
+                      onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
                       style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '12px 14px', fontSize: 14, width: '100%', outline: 'none' }}
                       required />
                   </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>PASSWORD</label>
-                    <input type="password" placeholder="••••••••"
-                      value={form.password}
-                      onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '12px 14px', fontSize: 14, width: '100%', outline: 'none' }}
-                      required />
+                )}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>EMAIL</label>
+                  <input type="email" placeholder="your@email.com"
+                    value={form.email}
+                    onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '12px 14px', fontSize: 14, width: '100%', outline: 'none' }}
+                    required />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>PASSWORD</label>
+                  <input type="password" placeholder="••••••••"
+                    value={form.password}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '12px 14px', fontSize: 14, width: '100%', outline: 'none' }}
+                    required />
+                </div>
+                {error && (
+                  <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', color: '#f87171', fontSize: 13 }}>
+                    ⚠ {error}
                   </div>
-                  {error && (
-                    <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', color: '#f87171', fontSize: 13 }}>
-                      ⚠ {error}
-                    </div>
-                  )}
-                  <button type="submit" disabled={loading}
-                    style={{ marginTop: 4, padding: '13px', background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.7 : 1 }}>
-                    {loading ? 'Please wait...' : showAuth === 'login' ? 'Sign In →' : 'Create Account →'}
-                  </button>
-                  {showAuth === 'register' && (
-                    <p style={{ fontSize: 11, color: '#475569', textAlign: 'center' }}>
-                      First analysis free. ₦2,500/month after.
-                    </p>
-                  )}
-                </form>
+                )}
+                <button type="submit" disabled={loading}
+                  style={{ marginTop: 4, padding: '13px', background: 'linear-gradient(135deg,#16a34a,#15803d)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.7 : 1 }}>
+                  {loading ? 'Please wait...' : showAuth === 'login' ? 'Sign In →' : 'Create Account →'}
+                </button>
+                {showAuth === 'register' && (
+                  <p style={{ fontSize: 11, color: '#475569', textAlign: 'center' }}>
+                    First analysis free. ₦2,500/month after.
+                  </p>
+                )}
+              </form>
             </div>
           </div>
         )}
