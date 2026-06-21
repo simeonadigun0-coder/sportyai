@@ -69,7 +69,7 @@ export default function ValueBetsPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch('/api/value-bets/today', { headers: authHeaders() })
+      const res = await fetch('/api/value-bet-today', { headers: authHeaders() })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load')
       setTodayBet(data.today)
