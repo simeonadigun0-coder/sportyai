@@ -1,3 +1,4 @@
+import { AdminUsersTable } from '@/components/AdminUsersTable'
 import { AdminValueBetPanel } from '@/components/AdminValueBetPanel'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/router'

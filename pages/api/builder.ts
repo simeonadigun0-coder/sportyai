@@ -351,11 +351,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = await findUserByEmail(auth.email)
   if (!user) return res.status(404).json({ error: 'User not found' })
 
-  const hasSubscription = isSubscriptionActive(user)
   const freeBuilderUsed = user.freeBuilderUsed || 0
-  const hasFreeTrials = freeBuilderUsed < 2 && !user.isAdmin
-  const canUse = user.isAdmin || hasSubscription || hasFreeTrials
-  if (!canUse) return res.status(403).json({ error: 'Subscription required', requiresSubscription: true })
+const hasFreeTrials = freeBuilderUsed < 2 && !user.isAdmin
+
+const hasSubscription = user.subscriptionTier && user.subscriptionTier !== 'free'
+
+const canUse = user.isAdmin || hasSubscription || hasFreeTrials
+
+if (!canUse) {
+  return res.status(403).json({
+    error: 'Subscription required',
+    requiresSubscription: true,
+    currentTier: user.subscriptionTier || 'free'
+  })
+}
 
   const { targetOdds = 10, riskLevel = 'medium', dateRange = 'today' } = req.body
 

@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { requireAuth } from '@/lib/auth'
-import { findUserByEmail, isSubscriptionActive, incrementFreeValueBetsUsed } from '@/lib/users'
+import { findUserByEmail, canAccessProFeatures, incrementFreeValueBetsUsed } from '@/lib/users'
 import Groq from 'groq-sdk'
 
 const BSD_BASE = 'https://sports.bzzoiro.com/api'
@@ -461,14 +461,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!auth) return
 
   const user = await findUserByEmail(auth.email)
-  if (!user) return res.status(404).json({ error: 'User not found' })
+if (!user) return res.status(404).json({ error: 'User not found' })
 
-  // Check access — admin, subscription, or free trials
-  const hasSubscription = isSubscriptionActive(user)
-  const freeValueBetsUsed = user.freeValueBetsUsed || 0
-  const hasFreeTrials = freeValueBetsUsed < 2 && !user.isAdmin
-  const canUse = user.isAdmin || hasSubscription || hasFreeTrials
-  if (!canUse) return res.status(403).json({ error: 'Subscription required', requiresSubscription: true })
+const freeValueBetsUsed = user.freeValueBetsUsed || 0
+const hasFreeTrials = freeValueBetsUsed < 2 && !user.isAdmin
+
+const hasSubscription = user.subscriptionTier && user.subscriptionTier !== 'free'
+
+const canUse = user.isAdmin || hasSubscription || hasFreeTrials
+
+if (!canUse) {
+  return res.status(403).json({
+    error: 'Subscription required',
+    requiresSubscription: true,
+    currentTier: user.subscriptionTier || 'free'
+  })
+}
 
   const { dateFrom, dateTo, targetMaxOdds = 3.0 } = req.body
 
