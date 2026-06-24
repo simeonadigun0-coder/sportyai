@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
 import Image from 'next/image'
-import { ProfileCard } from '@/components/ProfileCard'
+import ProfileCard from '@/components/ProfileCard'
 import { UpgradePrompt } from '@/components/UpgradePrompt'
 
 interface Game {
