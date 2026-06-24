@@ -350,7 +350,7 @@ export default function Dashboard() {
         <main style={{ maxWidth: 560, margin: '0 auto', padding: '16px 16px 100px' }}>
 
           {/* Profile Card — always visible */}
-          <ProfileCard onSubscribe={handleSubscribe} />
+          {/* <ProfileCard onSubscribe={handleSubscribe} /> */}
 
           {/* STEP 1 — Input */}
           {step === 'input' && (
