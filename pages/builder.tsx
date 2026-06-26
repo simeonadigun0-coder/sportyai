@@ -277,9 +277,7 @@ export default function BuilderPage() {
           <button style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3d1e', fontSize: 10, fontWeight: 700 }}>
             <span style={{ fontSize: 20 }}>🏗️</span>Builder
           </button>
-          <button onClick={() => router.push('/history')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
-            <span style={{ fontSize: 20 }}>📋</span>History
-          </button>
+
         </div>
       </div>
     </>
