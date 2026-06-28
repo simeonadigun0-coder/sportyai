@@ -7,7 +7,7 @@ import {
   isSubscriptionActive,
   markFreeAnalysisUsed
 } from '@/lib/users'
-import { analyseSlip } from '@/lib/groq'
+import { optimizeSlip } from '@/lib/slip-optimizer'
 import { SportyBetGame } from '@/lib/sportybet'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -63,14 +63,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const analysis = await analyseSlip(
-      games,
-      targetOdds,
-      originalTotalOdds,
-      allowSwitching || false,
-      clientMarkets || {},
-      user.username
-    )
+   const analysis = await optimizeSlip(
+  games,
+  targetOdds,
+  originalTotalOdds,
+  allowSwitching || false,
+  user.username
+)
 
     // Mark free trial as used if applicable
     if (hasFreeTrialLeft) {
