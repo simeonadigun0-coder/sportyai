@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
 import Image from 'next/image'
-import { ProfileCard } from '@/components/ProfileCard'
+
 import { UpgradePrompt } from '@/components/UpgradePrompt'
 
 interface Game {
@@ -350,7 +350,7 @@ export default function Dashboard() {
         <main style={{ maxWidth: 560, margin: '0 auto', padding: '16px 16px 100px' }}>
 
           {/* Profile Card — always visible */}
-          <ProfileCard onSubscribe={handleSubscribe} />
+          
 
           {/* STEP 1 — Input */}
           {step === 'input' && (
@@ -624,6 +624,10 @@ export default function Dashboard() {
             style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
             <span style={{ fontSize: 20 }}>🏗️</span>Builder
           </button>
+          <button onClick={() => router.push('/profile')}
+  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+  <span style={{ fontSize: 20 }}>👤</span>Profile
+</button>
         </div>
 
         {/* Payment Modal */}

@@ -243,6 +243,9 @@ export default function ValueBetsPage() {
           <button onClick={() => router.push('/builder')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
             <span style={{ fontSize: 20 }}>🏗️</span>Builder
           </button>
+          <button onClick={() => router.push('/profile')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+  <span style={{ fontSize: 20 }}>👤</span>Profile
+</button>
         </div>
       </div>
     </>

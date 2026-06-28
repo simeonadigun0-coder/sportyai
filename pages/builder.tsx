@@ -277,7 +277,9 @@ export default function BuilderPage() {
           <button style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3d1e', fontSize: 10, fontWeight: 700 }}>
             <span style={{ fontSize: 20 }}>🏗️</span>Builder
           </button>
-
+<button onClick={() => router.push('/profile')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+  <span style={{ fontSize: 20 }}>👤</span>Profile
+</button>
         </div>
       </div>
     </>
