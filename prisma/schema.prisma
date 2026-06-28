@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Fixture {
+  id               String            @id @default(cuid())
+  fixtureId        String            @unique
+  homeTeam         String
+  awayTeam         String
+  homeTeamId       String
+  awayTeamId       String
+  league           String
+  leagueId         String
+  country          String
+  matchDate        DateTime
+  status           FixtureStatus     @default(UPCOMING)
+  homeScore        Int?
+  awayScore        Int?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  statistics       MatchStatistics?
+  confidenceScores ConfidenceScore[]
+  valueBetScans    ValueBetScan[]
+
+  @@index([matchDate])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@index([leagueId])
+  @@index([status])
+}
+
+enum FixtureStatus {
+  UPCOMING
+  LIVE
+  FINISHED
+  POSTPONED
+  CANCELLED
+}
+
+model MatchStatistics {
+  id                String   @id @default(cuid())
+  fixtureId         String   @unique
+  fixture           Fixture  @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  homeFormString    String?
+  homeWins          Int      @default(0)
+  homeDraws         Int      @default(0)
+  homeLosses        Int      @default(0)
+  homeGoalsScored   Int      @default(0)
+  homeGoalsConceded Int      @default(0)
+  homeAvgScored     Float    @default(0)
+  homeAvgConceded   Float    @default(0)
+  awayFormString    String?
+  awayWins          Int      @default(0)
+  awayDraws         Int      @default(0)
+  awayLosses        Int      @default(0)
+  awayGoalsScored   Int      @default(0)
+  awayGoalsConceded Int      @default(0)
+  awayAvgScored     Float    @default(0)
+  awayAvgConceded   Float    @default(0)
+  probHome          Float    @default(0)
+  probDraw          Float    @default(0)
+  probAway          Float    @default(0)
+  predictedResult   String?
+  over15Rate        Float    @default(0)
+  over25Rate        Float    @default(0)
+  bttsRate          Float    @default(0)
+  xGHome            Float?
+  xGAway            Float?
+  homeInjuredCount  Int      @default(0)
+  awayInjuredCount  Int      @default(0)
+  oddsHome          Float?
+  oddsDraw          Float?
+  oddsAway          Float?
+  dataSource        String   @default("BSD")
+  fetchedAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([fixtureId])
+}
+
+model H2HRecord {
+  id              String   @id @default(cuid())
+  homeTeamId      String
+  awayTeamId      String
+  totalMeetings   Int      @default(0)
+  homeWins        Int      @default(0)
+  awayWins        Int      @default(0)
+  draws           Int      @default(0)
+  totalGoals      Int      @default(0)
+  avgGoalsPerGame Float    @default(0)
+  homeWinRate     Float    @default(0)
+  awayWinRate     Float    @default(0)
+  drawRate        Float    @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@unique([homeTeamId, awayTeamId])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+}
+
+model TeamStrength {
+  id              String   @id @default(cuid())
+  teamId          String   @unique
+  teamName        String
+  leagueId        String
+  attackStrength  Float    @default(50)
+  defenceStrength Float    @default(50)
+  overallStrength Float    @default(50)
+  homeStrength    Float    @default(50)
+  awayStrength    Float    @default(50)
+  formPoints      Int      @default(0)
+  formString      String?
+  gamesPlayed     Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@index([leagueId])
+  @@index([overallStrength])
+}
+
+model ConfidenceScore {
+  id                 String    @id @default(cuid())
+  fixtureId          String
+  fixture            Fixture   @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  pick               String
+  market             String
+  formScore          Float     @default(0)
+  homeAwayScore      Float     @default(0)
+  h2hScore           Float     @default(0)
+  goalTrendScore     Float     @default(0)
+  oddsScore          Float     @default(0)
+  teamStrengthScore  Float     @default(0)
+  grooveScore        Float     @default(0)
+  riskLevel          RiskLevel @default(MEDIUM)
+  confidence         Int       @default(0)
+  impliedProbability Float     @default(0)
+  realProbability    Float     @default(0)
+  valueEdge          Float     @default(0)
+  calculatedAt       DateTime  @default(now())
+
+  @@index([fixtureId])
+  @@index([grooveScore])
+  @@index([market])
+  @@index([calculatedAt])
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model MarketRule {
+  id                 String     @id @default(cuid())
+  marketKey          String     @unique
+  marketName         String
+  marketGroup        String
+  riskCategory       MarketRisk @default(MEDIUM)
+  minConfidence      Int        @default(65)
+  keepThreshold      Int        @default(70)
+  replaceThreshold   Int        @default(50)
+  removeThreshold    Int        @default(40)
+  requiredMetrics    Json
+  formWeight         Float      @default(0.30)
+  homeAwayWeight     Float      @default(0.20)
+  h2hWeight          Float      @default(0.15)
+  goalTrendWeight    Float      @default(0.15)
+  oddsWeight         Float      @default(0.10)
+  teamStrengthWeight Float      @default(0.10)
+  correlationGroup   String?
+  safeAlternative    String?
+  isActive           Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([marketGroup])
+  @@index([riskCategory])
+}
+
+enum MarketRisk {
+  SAFE
+  MEDIUM
+  HIGH_VOLATILITY
+  CUSTOM
+}
+
+model ValueBetScan {
+  id                 String   @id @default(cuid())
+  fixtureId          String
+  fixture            Fixture  @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  pick               String
+  market             String
+  odds               Float
+  grooveScore        Float
+  realProbability    Float
+  impliedProbability Float
+  valueEdge          Float
+  confidence         Int
+  reason             String
+  scanDate           DateTime @default(now())
+  isActive           Boolean  @default(true)
+
+  @@index([fixtureId])
+  @@index([scanDate])
+  @@index([grooveScore])
+}
+
+model SlipAnalysisLog {
+  id             String   @id @default(cuid())
+  userId         String
+  slipId         String?
+  totalGames     Int
+  keptGames      Int
+  removedGames   Int
+  replacedGames  Int
+  originalOdds   Float
+  newOdds        Float
+  targetOdds     Float
+  allowSwitching Boolean  @default(false)
+  avgGrooveScore Float    @default(0)
+  analysedAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([analysedAt])
+}
+
+model AccumulatorBuild {
+  id             String    @id @default(cuid())
+  userId         String
+  targetOdds     Float
+  actualOdds     Float
+  riskLevel      RiskLevel
+  legsCount      Int
+  avgGrooveScore Float
+  picks          Json
+  builtAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([builtAt])
+  @@index([avgGrooveScore])
+}
