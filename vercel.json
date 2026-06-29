@@ -4,17 +4,12 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/generate-value-bet",
-      "schedule": "0 9 * * *"
-    },
-    { "path": "/api/cron/scan-value-bets", "schedule": "0 9 * * *" },
-    {
-      "path": "/api/cron/ingest-fixtures",
-      "schedule": "0 6 * * *"
+      "path": "/api/cron/daily-pipeline",
+      "schedule": "0 5 * * *"
     },
     {
-  "path": "/api/cron/fetch-statistics",
-  "schedule": "0 7 * * *"
-}
+      "path": "/api/cron/settle-value-bet",
+      "schedule": "0 22 * * *"
+    }
   ]
 }
