@@ -7,10 +7,7 @@
       "path": "/api/cron/generate-value-bet",
       "schedule": "0 9 * * *"
     },
-    {
-      "path": "/api/cron/settle-value-bet",
-      "schedule": "0 22 * * *"
-    },
+    { "path": "/api/cron/scan-value-bets", "schedule": "0 9 * * *" },
     {
       "path": "/api/cron/ingest-fixtures",
       "schedule": "0 6 * * *"
