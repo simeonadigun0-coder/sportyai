@@ -67,13 +67,13 @@ export async function getEngineStatus(): Promise<EngineStatus> {
     : '0%'
 
   const avgGrooveScore = recentAnalyses.length > 0
-    ? Math.round(recentAnalyses.reduce((acc, a) => acc + a.avgGrooveScore, 0) / recentAnalyses.length)
+    ? Math.round(recentAnalyses.reduce((acc: number, a: { avgGrooveScore: number }) => acc + a.avgGrooveScore, 0) / recentAnalyses.length)
     : 0
 
   return {
     fixtures: { total: totalFixtures, upcoming: upcomingFixtures, today: todayFixtures },
     statistics: { total: totalStats, withStats: totalStats, coverage },
-    marketRules: { total: marketRules.length, active: marketRules.filter(r => r.isActive).length },
+    marketRules: { total: marketRules.length, active: marketRules.filter((r: { isActive: boolean }) => r.isActive).length },
     valueBetScans: {
       total: activeScans,
       active: activeScans,
@@ -133,8 +133,6 @@ export async function runAccumulatorBuilder(
 }
 
 // ─── FULL DAILY PIPELINE ──────────────────────────────────────────────────
-// Called by a single master cron at 5am
-// Runs all data ingestion in order
 
 export async function runDailyPipeline(): Promise<{
   fixtures: { ingested: number; errors: number }
@@ -145,16 +143,8 @@ export async function runDailyPipeline(): Promise<{
   const start = Date.now()
   console.log('[engine] Starting daily pipeline...')
 
-  // Step 1: Ingest fixtures
-  console.log('[engine] Step 1: Ingesting fixtures...')
   const fixtureResult = await ingestFixtures(2)
-
-  // Step 2: Fetch statistics
-  console.log('[engine] Step 2: Fetching statistics...')
   const statsResult = await fetchStatisticsForUpcomingFixtures()
-
-  // Step 3: Scan for value bets
-  console.log('[engine] Step 3: Scanning for value bets...')
   const valueBetResult = await scanForValueBets(3.5, 1)
 
   const duration = Date.now() - start
@@ -173,7 +163,7 @@ export async function runDailyPipeline(): Promise<{
 export async function getMarketRulesSummary() {
   const rules = await getAllMarketRules()
 
-  const byGroup = rules.reduce((acc, r) => {
+ const byGroup = rules.reduce((acc: Record<string, unknown[]>, r: { marketGroup: string; marketKey: string; marketName: string; riskCategory: string; keepThreshold: number; safeAlternative: string | null }) => {
     const group = r.marketGroup
     if (!acc[group]) acc[group] = []
     acc[group].push({
@@ -190,10 +180,10 @@ export async function getMarketRulesSummary() {
     total: rules.length,
     byGroup,
     byRisk: {
-      SAFE: rules.filter(r => r.riskCategory === 'SAFE').length,
-      MEDIUM: rules.filter(r => r.riskCategory === 'MEDIUM').length,
-      HIGH_VOLATILITY: rules.filter(r => r.riskCategory === 'HIGH_VOLATILITY').length,
-      CUSTOM: rules.filter(r => r.riskCategory === 'CUSTOM').length,
+      SAFE: rules.filter((r: { riskCategory: string }) => r.riskCategory === 'SAFE').length,
+      MEDIUM: rules.filter((r: { riskCategory: string }) => r.riskCategory === 'MEDIUM').length,
+      HIGH_VOLATILITY: rules.filter((r: { riskCategory: string }) => r.riskCategory === 'HIGH_VOLATILITY').length,
+      CUSTOM: rules.filter((r: { riskCategory: string }) => r.riskCategory === 'CUSTOM').length,
     },
   }
 }
