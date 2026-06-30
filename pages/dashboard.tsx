@@ -42,6 +42,9 @@ interface GameAnalysis extends Game {
   replacedOdds?: number
   replacementReason?: string
   needsResolution?: boolean
+  grooveScore?: number
+  valueEdge?: number
+  dataQuality?: 'FULL' | 'PARTIAL' | 'MINIMAL'
 }
 
 interface SlipAnalysis {
@@ -53,6 +56,63 @@ interface SlipAnalysis {
   targetOdds: number
   summary: string
   wasFreeTrial?: boolean
+  avgGrooveScore?: number
+}
+
+// ─── GROOVE SCORE HELPERS ───────────────────────────────────────────────
+function grooveScoreColor(score: number): string {
+  if (score >= 75) return '#16a34a'
+  if (score >= 60) return '#d97706'
+  return '#dc2626'
+}
+function grooveScoreBg(score: number): string {
+  if (score >= 75) return 'rgba(22,163,74,0.08)'
+  if (score >= 60) return 'rgba(217,119,6,0.08)'
+  return 'rgba(220,38,38,0.08)'
+}
+function grooveScoreEmoji(score: number): string {
+  if (score >= 75) return '🟢'
+  if (score >= 60) return '🟡'
+  return '🔴'
+}
+function grooveScoreLabel(score: number): string {
+  if (score >= 80) return 'STRONG'
+  if (score >= 70) return 'GOOD'
+  if (score >= 60) return 'FAIR'
+  if (score >= 50) return 'WEAK'
+  return 'POOR'
+}
+function GrooveScoreBadge({ score, size = 'normal' }: { score: number; size?: 'small' | 'normal' }) {
+  const isSmall = size === 'small'
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: isSmall ? 4 : 6, background: grooveScoreBg(score), border: `1.5px solid ${grooveScoreColor(score)}30`, borderRadius: isSmall ? 6 : 8, padding: isSmall ? '3px 7px' : '4px 10px' }}>
+      <span style={{ fontSize: isSmall ? 10 : 12 }}>{grooveScoreEmoji(score)}</span>
+      <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: isSmall ? 12 : 14, color: grooveScoreColor(score) }}>{score}</span>
+      <span style={{ fontSize: isSmall ? 9 : 10, fontWeight: 700, color: grooveScoreColor(score), opacity: 0.8 }}>{grooveScoreLabel(score)}</span>
+    </div>
+  )
+}
+function GrooveScoreBar({ score }: { score: number }) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em' }}>GROOVE SCORE</span>
+        <GrooveScoreBadge score={score} size="small" />
+      </div>
+      <div style={{ height: 5, background: '#f0f4f0', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${score}%`, background: `linear-gradient(90deg, ${grooveScoreColor(score)}, ${grooveScoreColor(score)}bb)`, borderRadius: 3 }} />
+      </div>
+    </div>
+  )
+}
+function ValueEdgeBadge({ edge }: { edge: number }) {
+  if (!edge || edge === 0) return null
+  const isPositive = edge > 0
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 5, background: isPositive ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)', color: isPositive ? '#16a34a' : '#dc2626' }}>
+      {isPositive ? '+' : ''}{edge}% edge
+    </span>
+  )
 }
 
 type Step = 'input' | 'decoded' | 'analysing' | 'result'
@@ -534,6 +594,17 @@ export default function Dashboard() {
                 <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, margin: 0 }}>{analysis.summary}</p>
               </div>
 
+              {analysis.avgGrooveScore !== undefined && analysis.avgGrooveScore > 0 && (
+                <div style={{ background: '#fff', borderRadius: 12, padding: '12px 16px', marginBottom: 12, border: `1.5px solid ${grooveScoreColor(analysis.avgGrooveScore)}30`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.04em', marginBottom: 4 }}>SLIP GROOVE SCORE</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Average score across kept picks</div>
+                  </div>
+                  <GrooveScoreBadge score={analysis.avgGrooveScore} />
+                </div>
+              )}
+
+
               {/* Kept Games */}
               <div style={{ background: '#fff', borderRadius: 14, padding: 16, marginBottom: 10, border: '1px solid #e8ede8' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', letterSpacing: '0.05em', marginBottom: 12 }}>✅ KEPT GAMES ({analysis.keptGames.length})</div>
@@ -548,15 +619,22 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>{g.league} · Pick: <strong style={{ color: '#0f2010' }}>{g.pick}</strong> ({g.market})</div>
-                      <div style={{ marginBottom: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>CONFIDENCE</span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor(g.confidenceScore) }}>{g.confidenceScore}%</span>
+                      {g.grooveScore !== undefined && g.grooveScore > 0 ? (
+                        <GrooveScoreBar score={g.grooveScore} />
+                      ) : (
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>CONFIDENCE</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor(g.confidenceScore) }}>{g.confidenceScore}%</span>
+                          </div>
+                          <div style={{ height: 4, background: '#f0f4f0', borderRadius: 2 }}>
+                            <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2 }} />
+                          </div>
                         </div>
-                        <div style={{ height: 4, background: '#f0f4f0', borderRadius: 2 }}>
-                          <div style={{ height: '100%', width: `${g.confidenceScore}%`, background: confidenceColor(g.confidenceScore), borderRadius: 2 }} />
-                        </div>
-                      </div>
+                      )}
+                      {g.valueEdge !== undefined && g.valueEdge !== 0 && (
+                        <div style={{ marginBottom: 6 }}><ValueEdgeBadge edge={g.valueEdge} /></div>
+                      )}
                       <div style={{ fontSize: 12, color: '#475569', fontStyle: 'italic', marginBottom: 4 }}>💡 {g.reason}</div>
                       {g.formSummary && <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>📊 {g.formSummary}</div>}
                       {(() => { const src = dataSourceLabel(g.dataSource); return <span style={{ fontSize: 10, color: src.color, fontWeight: 600 }}>● {src.label}</span> })()}
