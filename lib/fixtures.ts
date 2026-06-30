@@ -6,7 +6,7 @@
 
 import { prisma } from './db/prisma'
 
-const BSD_V2_BASE = 'https://api.bzzoiro.com/api/v2'
+const BSD_V2_BASE = 'https://sports.bzzoiro.com/api/v2'
 const BSD_TOKEN = process.env.BSD_API_KEY || ''
 const bsdHeaders = {
   'Authorization': `Token ${BSD_TOKEN}`,
