@@ -135,8 +135,7 @@ async function getBestPickForFixture(
   if (!stats) {
     await fetchAndStoreStatistics(
       fixture.id,
-      fixture.homeTeam,
-      fixture.awayTeam,
+      fixture.fixtureId,
       fixture.homeTeamId,
       fixture.awayTeamId
     )

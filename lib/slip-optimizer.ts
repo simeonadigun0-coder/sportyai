@@ -6,7 +6,7 @@
 import { prisma } from './db/prisma'
 import { calculateGrooveScore } from './confidence'
 import { applyMarketRule, resolveMarketKey } from './market-rules'
-import { fetchAndStoreStatistics, getStatisticsForFixture, getH2HRecord } from './statistics'
+import { fetchStatsByTeamSearch, getStatisticsForFixture, getH2HRecord } from './statistics'
 import { getFixtureById } from './fixtures'
 import { SportyBetGame } from './sportybet'
 import Groq from 'groq-sdk'
@@ -230,16 +230,16 @@ export async function optimizeSlip(
       // Ensure fixture exists in DB
       const fixtureDbId = await ensureFixtureInDB(game)
 
-      // Fetch statistics
+      /// Fetch statistics — slip optimizer analyses SportyBet games which
+      // don't have real BSD event IDs, so we use team-name search instead
       let stats = null
       let h2h = null
 
       if (fixtureDbId) {
         stats = await getStatisticsForFixture(fixtureDbId)
 
-        // If no stats yet, fetch them now
         if (!stats) {
-          await fetchAndStoreStatistics(
+          await fetchStatsByTeamSearch(
             fixtureDbId,
             game.homeTeam,
             game.awayTeam,
@@ -249,10 +249,8 @@ export async function optimizeSlip(
           stats = await getStatisticsForFixture(fixtureDbId)
         }
 
-        // Get H2H
         h2h = await getH2HRecord(`home_${game.eventId}`, `away_${game.eventId}`)
       }
-
       // Calculate Groove Score
       const scoreOutput = await calculateGrooveScore({
         pick: game.pick,
