@@ -3,42 +3,43 @@ import { useRouter } from 'next/router'
 import Head from 'next/head'
 import Image from 'next/image'
 
-interface Tier1Pick {
-  tier: 1
+interface AccumulatorLeg {
+  fixtureId: string
   homeTeam: string
   awayTeam: string
   league: string
-  startTime: string
+  country: string
+  matchDate: string
   pick: string
   market: string
   odds: number
+  grooveScore: number
   confidence: number
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  valueEdge: number
   reason: string
 }
 
-interface Tier2Pick {
-  tier: 2
-  homeTeam: string
-  awayTeam: string
-  league: string
-  startTime: string
-  pick: string
-  market: string
-  estimatedProbability: number
-  confidence: number
-  reason: string
+interface Accumulator {
+  id: string
+  legs: AccumulatorLeg[]
+  totalOdds: number
+  avgGrooveScore: number
+  avgConfidence: number
+  riskTier: string
+  legsCount: number
+  potentialReturn: number
+  summary: string
 }
 
 export default function BuilderPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
-  const [tier1, setTier1] = useState<Tier1Pick[]>([])
-  const [tier2, setTier2] = useState<Tier2Pick[]>([])
-  const [totalOdds, setTotalOdds] = useState(0)
+  const [accumulators, setAccumulators] = useState<Accumulator[]>([])
+  const [fixturesScanned, setFixturesScanned] = useState(0)
   const [summary, setSummary] = useState('')
   const [error, setError] = useState('')
-  const [targetOdds, setTargetOdds] = useState('10')
   const [riskLevel, setRiskLevel] = useState<'low' | 'medium' | 'high'>('medium')
   const [dateRange, setDateRange] = useState('today')
 
@@ -56,30 +57,43 @@ export default function BuilderPage() {
     Authorization: `Bearer ${localStorage.getItem('token')}`,
   })
 
+  const tierFromRisk = (r: 'low' | 'medium' | 'high'): 'SAFE' | 'BALANCED' | 'AGGRESSIVE' =>
+    r === 'low' ? 'SAFE' : r === 'high' ? 'AGGRESSIVE' : 'BALANCED'
+
+  const daysAheadFromRange = (r: string): number => {
+    if (r === 'tomorrow') return 2
+    if (r === 'week') return 7
+    if (r === 'month') return 30
+    return 1
+  }
+
   const handleBuild = async () => {
-    const target = parseFloat(targetOdds)
-    if (!target || target < 1.5) { setError('Enter a valid target odds (minimum 1.5)'); return }
     setLoading(true)
     setError('')
-    setTier1([])
-    setTier2([])
+    setAccumulators([])
     setSummary('')
 
     try {
       const res = await fetch('/api/builder', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ targetOdds: target, riskLevel, dateRange }),
+        body: JSON.stringify({
+          tier: tierFromRisk(riskLevel),
+          legs: 0,
+          daysAhead: daysAheadFromRange(dateRange),
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
         if (data.requiresSubscription) { setError('Subscribe to access the Builder'); return }
         throw new Error(data.error || 'Failed')
       }
-      setTier1(data.tier1 || [])
-      setTier2(data.tier2 || [])
-      setTotalOdds(data.totalOdds || 0)
+      setAccumulators(data.accumulators || [])
+      setFixturesScanned(data.fixturesScanned || 0)
       setSummary(data.summary || '')
+      if ((data.accumulators || []).length === 0) {
+        setError(data.summary || 'No accumulators could be built — try a different risk level or date range.')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to build accumulator')
     } finally {
@@ -87,15 +101,12 @@ export default function BuilderPage() {
     }
   }
 
-  const handleCopyAll = () => {
-    const lines = [
-      ...tier1.map(p => `${p.homeTeam} vs ${p.awayTeam} — ${p.pick} (${p.market}) @ ${p.odds}`),
-      ...tier2.map(p => `${p.homeTeam} vs ${p.awayTeam} — ${p.pick} (${p.market}) ~${p.estimatedProbability}% [verify odds]`),
-    ]
+  const handleCopy = (acc: Accumulator) => {
+    const lines = acc.legs.map(l => `${l.homeTeam} vs ${l.awayTeam} — ${l.pick} (${l.market})`)
     navigator.clipboard.writeText(lines.join('\n'))
   }
 
-  const confColor = (c: number) => c >= 75 ? '#16a34a' : c >= 60 ? '#d97706' : '#dc2626'
+  const scoreColor = (s: number) => s >= 75 ? '#16a34a' : s >= 60 ? '#d97706' : '#dc2626'
   const riskBg = (r: string) => ({ low: '#f0faf0', medium: '#fefce8', high: '#fef2f2' }[r] || '#f8faf8')
   const riskBorder = (r: string) => ({ low: '#16a34a', medium: '#d97706', high: '#dc2626' }[r] || '#e8ede8')
 
@@ -117,32 +128,17 @@ export default function BuilderPage() {
         <main style={{ maxWidth: 560, margin: '0 auto', padding: '16px 16px 100px' }}>
           <div style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f2010', marginBottom: 2 }}>🏗️ Accumulator Builder</h2>
-            <p style={{ color: '#64748b', fontSize: 13 }}>Set your target — AI builds the best slip from upcoming fixtures</p>
+            <p style={{ color: '#64748b', fontSize: 13 }}>Pick a risk level — AI builds the best slip from upcoming fixtures using real Groove Score data</p>
           </div>
 
           <div style={{ background: '#fff', borderRadius: 16, padding: 20, marginBottom: 14, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 8, letterSpacing: '0.05em' }}>TARGET ODDS</label>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                {[5, 10, 20, 50, 100].map(odd => (
-                  <button key={odd} onClick={() => setTargetOdds(String(odd))}
-                    style={{ flex: 1, padding: '9px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, background: targetOdds === String(odd) ? '#1a3d1e' : '#f8faf8', color: targetOdds === String(odd) ? '#fff' : '#475569', border: targetOdds === String(odd) ? '1.5px solid #1a3d1e' : '1.5px solid #e8ede8', cursor: 'pointer' }}>
-                    {odd}x
-                  </button>
-                ))}
-              </div>
-              <input type="number" placeholder="Or type any target e.g. 500"
-                value={targetOdds} onChange={e => setTargetOdds(e.target.value)} min={1.5} step="any"
-                style={{ width: '100%', background: '#f8faf8', border: '1.5px solid #e8ede8', borderRadius: 9, padding: '12px 14px', fontSize: 14, color: '#0f2010', boxSizing: 'border-box' }} />
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 8, letterSpacing: '0.05em' }}>RISK LEVEL</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  { value: 'low', label: '🛡️ Low Risk', desc: 'Safe picks — strong favourites, odds 1.2-1.8' },
-                  { value: 'medium', label: '⚖️ Medium Risk', desc: 'Balanced picks — data-backed, odds 1.5-2.5' },
-                  { value: 'high', label: '🎯 High Risk', desc: 'Bigger returns — odds 2.0-4.0 based on form/H2H' },
+                  { value: 'low', label: '🛡️ Low Risk', desc: 'Safe picks — strong favourites, highest Groove Score threshold' },
+                  { value: 'medium', label: '⚖️ Medium Risk', desc: 'Balanced picks — data-backed, moderate threshold' },
+                  { value: 'high', label: '🎯 High Risk', desc: 'Bigger combinations — broader picks based on form/H2H' },
                 ].map(opt => (
                   <button key={opt.value} onClick={() => setRiskLevel(opt.value as 'low' | 'medium' | 'high')}
                     style={{ padding: '12px 14px', borderRadius: 10, textAlign: 'left', cursor: 'pointer', background: riskLevel === opt.value ? riskBg(opt.value) : '#f8faf8', border: riskLevel === opt.value ? `2px solid ${riskBorder(opt.value)}` : '1.5px solid #e8ede8' }}>
@@ -183,39 +179,43 @@ export default function BuilderPage() {
             </div>
           )}
 
-          {(tier1.length > 0 || tier2.length > 0) && !loading && (
+          {accumulators.length > 0 && !loading && (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
-                {[
-                  { label: 'PICKS', value: tier1.length + tier2.length, color: '#1a3d1e' },
-                  { label: 'VERIFIED ODDS', value: totalOdds.toFixed(2), color: '#16a34a' },
-                  { label: 'RISK', value: riskLevel.toUpperCase(), color: riskLevel === 'low' ? '#16a34a' : riskLevel === 'medium' ? '#d97706' : '#dc2626' },
-                ].map(s => (
-                  <div key={s.label} style={{ background: '#fff', borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: '1px solid #e8ede8' }}>
-                    <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>{s.label}</div>
-                    <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 800, color: s.color }}>{s.value}</div>
-                  </div>
-                ))}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 14 }}>
+                <div style={{ background: '#fff', borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: '1px solid #e8ede8' }}>
+                  <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>OPTIONS BUILT</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 800, color: '#1a3d1e' }}>{accumulators.length}</div>
+                </div>
+                <div style={{ background: '#fff', borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: '1px solid #e8ede8' }}>
+                  <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>FIXTURES SCANNED</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 800, color: '#1a3d1e' }}>{fixturesScanned}</div>
+                </div>
               </div>
 
               {summary && (
-                <div style={{ background: '#fff', borderRadius: 12, padding: '12px 14px', marginBottom: 12, display: 'flex', gap: 10, border: '1px solid #e8ede8' }}>
+                <div style={{ background: '#fff', borderRadius: 12, padding: '12px 14px', marginBottom: 14, display: 'flex', gap: 10, border: '1px solid #e8ede8' }}>
                   <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
                   <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, margin: 0 }}>{summary}</p>
                 </div>
               )}
 
-              <button onClick={handleCopyAll} style={{ width: '100%', padding: 12, background: '#1a3d1e', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginBottom: 14 }}>
-                📋 Copy All Picks
-              </button>
+              {accumulators.map((acc) => (
+                <div key={acc.id} style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #e8ede8', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1a3d1e', letterSpacing: '0.05em' }}>
+                        {acc.legsCount}-LEG {acc.riskTier}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>Est. return on ₦1,000: ₦{acc.potentialReturn.toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 16, color: scoreColor(acc.avgGrooveScore) }}>{acc.avgGrooveScore}</div>
+                      <div style={{ fontSize: 9, color: '#94a3b8' }}>GROOVE SCORE</div>
+                    </div>
+                  </div>
 
-              {/* Tier 1 — Verified */}
-              {tier1.length > 0 && (
-                <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #e8ede8', marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', letterSpacing: '0.05em', marginBottom: 4 }}>✅ TIER 1 — VERIFIED ODDS ({tier1.length})</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>Real bookmaker odds, fully automated picks</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {tier1.map((g, i) => (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+                    {acc.legs.map((g, i) => (
                       <div key={i} style={{ padding: 12, borderRadius: 10, background: '#f8faf8', border: '1px solid #e8ede8' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                           <div>
@@ -223,8 +223,8 @@ export default function BuilderPage() {
                             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>{g.league}</div>
                           </div>
                           <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
-                            <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 16, color: '#1a3d1e' }}>{g.odds}</div>
-                            <div style={{ fontSize: 10, color: confColor(g.confidence), fontWeight: 700 }}>{g.confidence}%</div>
+                            <div style={{ fontSize: 12, fontWeight: 800, color: scoreColor(g.grooveScore) }}>{g.grooveScore}</div>
+                            <div style={{ fontSize: 9, color: '#94a3b8' }}>SCORE</div>
                           </div>
                         </div>
                         <div style={{ fontSize: 12, color: '#475569', marginBottom: 4 }}>Pick: <strong style={{ color: '#0f2010' }}>{g.pick}</strong> ({g.market})</div>
@@ -232,35 +232,14 @@ export default function BuilderPage() {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
 
-              {/* Tier 2 — AI Suggested */}
-              {tier2.length > 0 && (
-                <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid rgba(217,119,6,0.2)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#d97706', letterSpacing: '0.05em', marginBottom: 4 }}>🎯 TIER 2 — AI SUGGESTED ({tier2.length})</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>Estimated probability — verify odds on SportyBet before adding</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {tier2.map((g, i) => (
-                      <div key={i} style={{ padding: 12, borderRadius: 10, background: 'rgba(217,119,6,0.04)', border: '1px solid rgba(217,119,6,0.15)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 13, color: '#0f2010' }}>{g.homeTeam} vs {g.awayTeam}</div>
-                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>{g.league}</div>
-                          </div>
-                          <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
-                            <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14, color: '#d97706' }}>~{g.estimatedProbability}%</div>
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 12, color: '#475569', marginBottom: 4 }}>Pick: <strong style={{ color: '#0f2010' }}>{g.pick}</strong> ({g.market})</div>
-                        <div style={{ fontSize: 11, color: '#64748b', fontStyle: 'italic' }}>💡 {g.reason}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <button onClick={() => handleCopy(acc)} style={{ width: '100%', padding: 10, background: '#1a3d1e', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    📋 Copy This Slip
+                  </button>
                 </div>
-              )}
+              ))}
 
-              <button onClick={handleBuild} style={{ width: '100%', marginTop: 12, padding: 12, background: '#fff', color: '#1a3d1e', border: '1.5px solid #1a3d1e', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+              <button onClick={handleBuild} style={{ width: '100%', marginTop: 4, padding: 12, background: '#fff', color: '#1a3d1e', border: '1.5px solid #1a3d1e', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                 🔄 Rebuild with Same Settings
               </button>
             </>
@@ -277,9 +256,9 @@ export default function BuilderPage() {
           <button style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3d1e', fontSize: 10, fontWeight: 700 }}>
             <span style={{ fontSize: 20 }}>🏗️</span>Builder
           </button>
-<button onClick={() => router.push('/profile')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
-  <span style={{ fontSize: 20 }}>👤</span>Profile
-</button>
+          <button onClick={() => router.push('/profile')} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+            <span style={{ fontSize: 20 }}>👤</span>Profile
+          </button>
         </div>
       </div>
     </>
