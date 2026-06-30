@@ -6,7 +6,7 @@
 import { optimizeSlip } from './slip-optimizer'
 import { scanForValueBets, getCachedValueBets, buildCombinations } from './value-bet-engine'
 import { buildAccumulators } from './accumulator-builder'
-import { ingestFixtures } from './fixtures'
+import { ingestFixturesWithFallback } from './fixtures'
 import { fetchStatisticsForUpcomingFixtures } from './statistics'
 import { getAllMarketRules } from './market-rules'
 import { prisma } from './db/prisma'
@@ -143,7 +143,7 @@ export async function runDailyPipeline(): Promise<{
   const start = Date.now()
   console.log('[engine] Starting daily pipeline...')
 
-  const fixtureResult = await ingestFixtures(2)
+  const fixtureResult = await ingestFixturesWithFallback(2)
   const statsResult = await fetchStatisticsForUpcomingFixtures()
   const valueBetResult = await scanForValueBets(3.5, 1)
 
@@ -151,7 +151,7 @@ export async function runDailyPipeline(): Promise<{
   console.log(`[engine] Daily pipeline complete in ${duration}ms`)
 
   return {
-    fixtures: { ingested: fixtureResult.ingested, errors: fixtureResult.errors },
+    fixtures: { ingested: fixtureResult.bsd.ingested, errors: fixtureResult.bsd.errors },
     statistics: { success: statsResult.success, failed: statsResult.failed },
     valueBets: { total: valueBetResult.total, fixturesScanned: valueBetResult.fixturesScanned },
     duration,

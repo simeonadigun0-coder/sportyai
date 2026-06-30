@@ -1,182 +1,234 @@
 // lib/fixtures.ts
 // Module 2 — Fixture Ingestion Service
-// Source: TheSportsDB (free, no API key required)
+// REWRITTEN: Now uses BSD (sports.bzzoiro.com) v2 API as primary source
+// BSD covers 66 leagues including NPFL, free tier, no rate limit
+// TheSportsDB removed — was unreliable and returning zero fixtures
 
 import { prisma } from './db/prisma'
 
-const SPORTSDB_BASE = 'https://www.thesportsdb.com/api/v1/json/3'
-
-const TRACKED_LEAGUES = [
-  // ── ENGLAND ──────────────────────────────────────────────────────────
-  { id: '4328', name: 'Premier League', country: 'England' },
-  { id: '4329', name: 'Championship', country: 'England' },
-  { id: '4330', name: 'League One', country: 'England' },
-  { id: '4331', name: 'League Two', country: 'England' },
-  { id: '4667', name: 'FA Cup', country: 'England' },
-  { id: '4668', name: 'EFL Cup', country: 'England' },
-
-  // ── SPAIN ─────────────────────────────────────────────────────────────
-  { id: '4335', name: 'La Liga', country: 'Spain' },
-  { id: '4336', name: 'La Liga 2', country: 'Spain' },
-
-  // ── GERMANY ───────────────────────────────────────────────────────────
-  { id: '4331', name: 'Bundesliga', country: 'Germany' },
-  { id: '4332', name: 'Bundesliga 2', country: 'Germany' },
-
-  // ── ITALY ─────────────────────────────────────────────────────────────
-  { id: '4332', name: 'Serie A', country: 'Italy' },
-  { id: '4333', name: 'Serie B', country: 'Italy' },
-
-  // ── FRANCE ────────────────────────────────────────────────────────────
-  { id: '4334', name: 'Ligue 1', country: 'France' },
-  { id: '4338', name: 'Ligue 2', country: 'France' },
-
-  // ── EUROPE ────────────────────────────────────────────────────────────
-  { id: '4346', name: 'Champions League', country: 'Europe' },
-  { id: '4375', name: 'Europa League', country: 'Europe' },
-  { id: '4417', name: 'Europa Conference League', country: 'Europe' },
-
-  // ── NETHERLANDS ───────────────────────────────────────────────────────
-  { id: '4337', name: 'Eredivisie', country: 'Netherlands' },
-
-  // ── PORTUGAL ──────────────────────────────────────────────────────────
-  { id: '4344', name: 'Primeira Liga', country: 'Portugal' },
-
-  // ── BELGIUM ───────────────────────────────────────────────────────────
-  { id: '4397', name: 'Pro League', country: 'Belgium' },
-
-  // ── TURKEY ────────────────────────────────────────────────────────────
-  { id: '4340', name: 'Super Lig', country: 'Turkey' },
-
-  // ── GREECE ────────────────────────────────────────────────────────────
-  { id: '4339', name: 'Super League', country: 'Greece' },
-
-  // ── SCOTLAND ──────────────────────────────────────────────────────────
-  { id: '4330', name: 'Scottish Premiership', country: 'Scotland' },
-
-  // ── RUSSIA ────────────────────────────────────────────────────────────
-  { id: '4356', name: 'Russian Premier League', country: 'Russia' },
-
-  // ── UKRAINE ───────────────────────────────────────────────────────────
-  { id: '4357', name: 'Ukrainian Premier League', country: 'Ukraine' },
-
-  // ── AUSTRIA ───────────────────────────────────────────────────────────
-  { id: '4396', name: 'Austrian Bundesliga', country: 'Austria' },
-
-  // ── SWITZERLAND ───────────────────────────────────────────────────────
-  { id: '4398', name: 'Swiss Super League', country: 'Switzerland' },
-
-  // ── DENMARK ───────────────────────────────────────────────────────────
-  { id: '4341', name: 'Superliga', country: 'Denmark' },
-
-  // ── SWEDEN ────────────────────────────────────────────────────────────
-  { id: '4342', name: 'Allsvenskan', country: 'Sweden' },
-
-  // ── NORWAY ────────────────────────────────────────────────────────────
-  { id: '4343', name: 'Eliteserien', country: 'Norway' },
-
-  // ── POLAND ────────────────────────────────────────────────────────────
-  { id: '4406', name: 'Ekstraklasa', country: 'Poland' },
-
-  // ── CZECH REPUBLIC ────────────────────────────────────────────────────
-  { id: '4407', name: 'Czech First League', country: 'Czech Republic' },
-
-  // ── CROATIA ───────────────────────────────────────────────────────────
-  { id: '4408', name: 'Croatian Football League', country: 'Croatia' },
-
-  // ── SERBIA ────────────────────────────────────────────────────────────
-  { id: '4409', name: 'Serbian SuperLiga', country: 'Serbia' },
-
-  // ── ROMANIA ───────────────────────────────────────────────────────────
-  { id: '4410', name: 'Liga I', country: 'Romania' },
-
-  // ── AFRICA ────────────────────────────────────────────────────────────
-  { id: '4480', name: 'NPFL', country: 'Nigeria' },
-  { id: '4482', name: 'Ghana Premier League', country: 'Ghana' },
-  { id: '4484', name: 'South African PSL', country: 'South Africa' },
-  { id: '4485', name: 'Egyptian Premier League', country: 'Egypt' },
-  { id: '4486', name: 'Moroccan Botola Pro', country: 'Morocco' },
-  { id: '4487', name: 'Tunisian Ligue 1', country: 'Tunisia' },
-  { id: '4488', name: 'Algerian Ligue Professionnelle 1', country: 'Algeria' },
-  { id: '4489', name: 'Kenyan Premier League', country: 'Kenya' },
-  { id: '4490', name: 'CAF Champions League', country: 'Africa' },
-  { id: '4491', name: 'CAF Confederation Cup', country: 'Africa' },
-  { id: '4573', name: 'Tanzanian Premier League', country: 'Tanzania' },
-  { id: '4574', name: 'Ugandan Premier League', country: 'Uganda' },
-  { id: '4575', name: 'Zambian Super League', country: 'Zambia' },
-  { id: '4576', name: 'Zimbabwean Premier Soccer League', country: 'Zimbabwe' },
-  { id: '4577', name: 'Ethiopian Premier League', country: 'Ethiopia' },
-  { id: '4578', name: 'Senegalese Ligue 1', country: 'Senegal' },
-  { id: '4579', name: 'Cameroonian MTN Elite One', country: 'Cameroon' },
-  { id: '4580', name: 'Ivorian Ligue 1', country: 'Ivory Coast' },
-
-  // ── SOUTH AMERICA ─────────────────────────────────────────────────────
-  { id: '4351', name: 'Brazilian Serie A', country: 'Brazil' },
-  { id: '4352', name: 'Brazilian Serie B', country: 'Brazil' },
-  { id: '4353', name: 'Argentine Primera Division', country: 'Argentina' },
-  { id: '4354', name: 'Colombian Primera A', country: 'Colombia' },
-  { id: '4355', name: 'Chilean Primera Division', country: 'Chile' },
-  { id: '4381', name: 'Copa Libertadores', country: 'South America' },
-  { id: '4382', name: 'Copa Sudamericana', country: 'South America' },
-  { id: '4422', name: 'Peruvian Primera Division', country: 'Peru' },
-  { id: '4423', name: 'Ecuadorian Serie A', country: 'Ecuador' },
-  { id: '4424', name: 'Uruguayan Primera Division', country: 'Uruguay' },
-  { id: '4425', name: 'Venezuelan Primera Division', country: 'Venezuela' },
-
-  // ── NORTH AMERICA ─────────────────────────────────────────────────────
-  { id: '4346', name: 'MLS', country: 'USA' },
-  { id: '4347', name: 'Liga MX', country: 'Mexico' },
-  { id: '4430', name: 'Canadian Premier League', country: 'Canada' },
-
-  // ── ASIA ──────────────────────────────────────────────────────────────
-  { id: '4358', name: 'Saudi Pro League', country: 'Saudi Arabia' },
-  { id: '4359', name: 'UAE Pro League', country: 'UAE' },
-  { id: '4360', name: 'Qatar Stars League', country: 'Qatar' },
-  { id: '4361', name: 'J1 League', country: 'Japan' },
-  { id: '4362', name: 'K League 1', country: 'South Korea' },
-  { id: '4363', name: 'Chinese Super League', country: 'China' },
-  { id: '4364', name: 'Indian Super League', country: 'India' },
-  { id: '4365', name: 'AFC Champions League', country: 'Asia' },
-  { id: '4431', name: 'Indonesian Liga 1', country: 'Indonesia' },
-  { id: '4432', name: 'Thai League 1', country: 'Thailand' },
-  { id: '4433', name: 'Malaysian Super League', country: 'Malaysia' },
-
-  // ── INTERNATIONAL ─────────────────────────────────────────────────────
-  { id: '4370', name: 'FIFA World Cup', country: 'International' },
-  { id: '4371', name: 'UEFA European Championship', country: 'International' },
-  { id: '4372', name: 'Africa Cup of Nations', country: 'International' },
-  { id: '4373', name: 'Copa America', country: 'International' },
-  { id: '4374', name: 'Nations League', country: 'International' },
-]
-
-interface SportsDBEvent {
-  idEvent: string
-  strHomeTeam: string
-  strAwayTeam: string
-  idHomeTeam: string
-  idAwayTeam: string
-  strLeague: string
-  idLeague: string
-  strCountry: string
-  dateEvent: string
-  strTime: string
-  intHomeScore: string | null
-  intAwayScore: string | null
-  strStatus: string
+const BSD_V2_BASE = 'https://api.bzzoiro.com/api/v2'
+const BSD_TOKEN = process.env.BSD_API_KEY || ''
+const bsdHeaders = {
+  'Authorization': `Token ${BSD_TOKEN}`,
+  'Content-Type': 'application/json',
 }
 
+// ─── BSD EVENT TYPES ───────────────────────────────────────────────────────
+
+interface BSDLeague {
+  id: number
+  name: string
+  country: string
+}
+
+interface BSDEvent {
+  id: number
+  league_id: number
+  season_id: number
+  home_team_id: number
+  home_team: string
+  away_team_id: number
+  away_team: string
+  event_date: string
+  status: string
+  home_score: number | null
+  away_score: number | null
+  round_name: string | null
+  group_name: string | null
+}
+
+interface BSDEventsResponse {
+  count: number
+  results: BSDEvent[]
+  next: string | null
+}
+
+// ─── STATUS MAPPING ─────────────────────────────────────────────────────────
+
 function mapStatus(status: string): 'UPCOMING' | 'LIVE' | 'FINISHED' | 'POSTPONED' | 'CANCELLED' {
-  const s = status?.toLowerCase() || ''
-  if (s === 'match finished' || s === 'ft' || s === 'aet' || s === 'pen') return 'FINISHED'
-  if (s === 'live' || s === 'in progress' || s === '1h' || s === '2h' || s === 'ht') return 'LIVE'
+  const s = (status || '').toLowerCase()
+  if (s === 'finished' || s === 'ft' || s === 'aet' || s === 'pen' || s === 'ended') return 'FINISHED'
+  if (s === 'live' || s === 'inprogress' || s === '1h' || s === '2h' || s === 'ht' || s === 'in_progress') return 'LIVE'
   if (s === 'postponed') return 'POSTPONED'
-  if (s === 'cancelled' || s === 'canceled') return 'CANCELLED'
+  if (s === 'cancelled' || s === 'canceled' || s === 'abandoned') return 'CANCELLED'
   return 'UPCOMING'
 }
 
-async function fetchFixturesForLeague(leagueId: string, date: string): Promise<SportsDBEvent[]> {
+// ─── FETCH LEAGUES (cached once per ingestion run) ─────────────────────────
+
+let leagueCache: Map<number, BSDLeague> | null = null
+
+async function getLeagueMap(): Promise<Map<number, BSDLeague>> {
+  if (leagueCache) return leagueCache
+
+  const map = new Map<number, BSDLeague>()
   try {
-    const url = `${SPORTSDB_BASE}/eventsday.php?d=${date}&l=${leagueId}`
+    const res = await fetch(`${BSD_V2_BASE}/leagues/?limit=200`, {
+      headers: bsdHeaders,
+      signal: AbortSignal.timeout(10000),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const leagues = (data.results || data) as BSDLeague[]
+      for (const l of leagues) {
+        map.set(l.id, l)
+      }
+    }
+  } catch (err) {
+    console.error('[fixtures] Failed to fetch leagues:', err)
+  }
+
+  leagueCache = map
+  return map
+}
+
+// ─── FETCH FIXTURES FOR DATE RANGE — paginated ─────────────────────────────
+
+async function fetchBSDEvents(dateFrom: string, dateTo: string): Promise<BSDEvent[]> {
+  const allEvents: BSDEvent[] = []
+  let offset = 0
+  const limit = 200
+  let hasMore = true
+  let pageGuard = 0 // safety against infinite loops
+
+  while (hasMore && pageGuard < 20) {
+    try {
+      const url = `${BSD_V2_BASE}/events/?date_from=${dateFrom}&date_to=${dateTo}&limit=${limit}&offset=${offset}`
+      const res = await fetch(url, {
+        headers: bsdHeaders,
+        signal: AbortSignal.timeout(10000),
+      })
+
+      if (!res.ok) {
+        console.error(`[fixtures] BSD events fetch failed: ${res.status}`)
+        break
+      }
+
+      const data: BSDEventsResponse = await res.json()
+      const results = data.results || []
+      allEvents.push(...results)
+
+      hasMore = !!data.next && results.length === limit
+      offset += limit
+      pageGuard++
+    } catch (err) {
+      console.error('[fixtures] BSD events fetch error:', err)
+      break
+    }
+  }
+
+  return allEvents
+}
+
+// ─── UPSERT FIXTURE INTO DB ─────────────────────────────────────────────────
+
+async function upsertFixture(event: BSDEvent, leagueMap: Map<number, BSDLeague>): Promise<void> {
+  try {
+    const league = leagueMap.get(event.league_id)
+    const status = mapStatus(event.status)
+
+    await prisma.fixture.upsert({
+      where: { fixtureId: String(event.id) },
+      update: {
+        status,
+        homeScore: event.home_score,
+        awayScore: event.away_score,
+        updatedAt: new Date(),
+      },
+      create: {
+        fixtureId: String(event.id),
+        homeTeam: event.home_team,
+        awayTeam: event.away_team,
+        homeTeamId: String(event.home_team_id),
+        awayTeamId: String(event.away_team_id),
+        league: league?.name || `League ${event.league_id}`,
+        leagueId: String(event.league_id),
+        country: league?.country || 'Unknown',
+        matchDate: new Date(event.event_date),
+        status,
+        homeScore: event.home_score,
+        awayScore: event.away_score,
+      },
+    })
+  } catch (err) {
+    console.error(`[fixtures] Failed to upsert ${event.home_team} vs ${event.away_team}:`, err)
+  }
+}
+
+// ─── MAIN INGESTION FUNCTION ─────────────────────────────────────────────────
+
+export async function ingestFixtures(daysAhead: number = 2): Promise<{
+  total: number
+  ingested: number
+  errors: number
+  dates: string[]
+}> {
+  const today = new Date()
+  const endDate = new Date(today.getTime() + daysAhead * 24 * 60 * 60 * 1000)
+
+  const dateFrom = today.toISOString().split('T')[0]
+  const dateTo = endDate.toISOString().split('T')[0]
+
+  console.log(`[fixtures] Fetching BSD events from ${dateFrom} to ${dateTo}`)
+
+  const [leagueMap, events] = await Promise.all([
+    getLeagueMap(),
+    fetchBSDEvents(dateFrom, dateTo),
+  ])
+
+  let ingested = 0
+  let errors = 0
+
+  for (const event of events) {
+    try {
+      await upsertFixture(event, leagueMap)
+      ingested++
+    } catch {
+      errors++
+    }
+  }
+
+  console.log(`[fixtures] Ingested ${ingested}/${events.length} fixtures from BSD for ${dateFrom} to ${dateTo}`)
+
+  return {
+    total: events.length,
+    ingested,
+    errors,
+    dates: [dateFrom, dateTo],
+  }
+}
+
+// ─── ESPN FALLBACK ───────────────────────────────────────────────────────────
+// Only used when BSD returns suspiciously few fixtures for the day
+// Covers major leagues as a backup data source
+
+interface ESPNEvent {
+  id: string
+  date: string
+  name: string
+  competitions: Array<{
+    competitors: Array<{
+      homeAway: string
+      team: { displayName: string }
+    }>
+    status: { type: { name: string } }
+  }>
+}
+
+const ESPN_LEAGUES = [
+  { slug: 'eng.1', name: 'Premier League', country: 'England' },
+  { slug: 'esp.1', name: 'La Liga', country: 'Spain' },
+  { slug: 'ger.1', name: 'Bundesliga', country: 'Germany' },
+  { slug: 'ita.1', name: 'Serie A', country: 'Italy' },
+  { slug: 'fra.1', name: 'Ligue 1', country: 'France' },
+  { slug: 'uefa.champions', name: 'Champions League', country: 'Europe' },
+  { slug: 'uefa.europa', name: 'Europa League', country: 'Europe' },
+]
+
+async function fetchESPNFixturesForLeague(slug: string, date: string): Promise<ESPNEvent[]> {
+  try {
+    const formattedDate = date.replace(/-/g, '')
+    const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${formattedDate}`
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
     if (!res.ok) return []
     const data = await res.json()
@@ -186,86 +238,108 @@ async function fetchFixturesForLeague(leagueId: string, date: string): Promise<S
   }
 }
 
-async function upsertFixture(event: SportsDBEvent, leagueName: string, country: string): Promise<void> {
+async function upsertESPNFixture(event: ESPNEvent, leagueName: string, country: string): Promise<void> {
   try {
-    const matchDate = new Date(`${event.dateEvent}T${event.strTime || '00:00:00'}`)
-    const status = mapStatus(event.strStatus)
+    const comp = event.competitions?.[0]
+    if (!comp) return
+
+    const home = comp.competitors.find(c => c.homeAway === 'home')
+    const away = comp.competitors.find(c => c.homeAway === 'away')
+    if (!home || !away) return
+
+    const espnId = `espn_${event.id}`
+
+    // Skip if a fixture with similar teams already exists from BSD for the same day
+    const existing = await prisma.fixture.findFirst({
+      where: {
+        homeTeam: { contains: home.team.displayName.split(' ')[0], mode: 'insensitive' },
+        awayTeam: { contains: away.team.displayName.split(' ')[0], mode: 'insensitive' },
+        matchDate: {
+          gte: new Date(new Date(event.date).getTime() - 12 * 60 * 60 * 1000),
+          lte: new Date(new Date(event.date).getTime() + 12 * 60 * 60 * 1000),
+        },
+      },
+    })
+
+    if (existing) return // BSD already has this fixture, skip duplicate
 
     await prisma.fixture.upsert({
-      where: { fixtureId: event.idEvent },
-      update: {
-        status,
-        homeScore: event.intHomeScore ? parseInt(event.intHomeScore) : null,
-        awayScore: event.intAwayScore ? parseInt(event.intAwayScore) : null,
-        updatedAt: new Date(),
-      },
+      where: { fixtureId: espnId },
+      update: { updatedAt: new Date() },
       create: {
-        fixtureId: event.idEvent,
-        homeTeam: event.strHomeTeam,
-        awayTeam: event.strAwayTeam,
-        homeTeamId: event.idHomeTeam || `home_${event.idEvent}`,
-        awayTeamId: event.idAwayTeam || `away_${event.idEvent}`,
+        fixtureId: espnId,
+        homeTeam: home.team.displayName,
+        awayTeam: away.team.displayName,
+        homeTeamId: `espn_home_${event.id}`,
+        awayTeamId: `espn_away_${event.id}`,
         league: leagueName,
-        leagueId: event.idLeague,
+        leagueId: `espn_${leagueName}`,
         country,
-        matchDate,
-        status,
-        homeScore: event.intHomeScore ? parseInt(event.intHomeScore) : null,
-        awayScore: event.intAwayScore ? parseInt(event.intAwayScore) : null,
+        matchDate: new Date(event.date),
+        status: 'UPCOMING',
       },
     })
   } catch (err) {
-    console.error(`[fixtures] Failed to upsert ${event.strHomeTeam} vs ${event.strAwayTeam}:`, err)
+    console.error('[fixtures] ESPN upsert failed:', err)
   }
 }
 
-export async function ingestFixtures(daysAhead: number = 2): Promise<{
-  total: number
-  ingested: number
-  errors: number
-  dates: string[]
-}> {
+export async function fillGapsWithESPN(daysAhead: number = 2): Promise<{ added: number }> {
+  let added = 0
   const dates: string[] = []
   for (let i = 0; i < daysAhead; i++) {
-    const d = new Date()
-    d.setDate(d.getDate() + i)
+    const d = new Date(Date.now() + i * 24 * 60 * 60 * 1000)
     dates.push(d.toISOString().split('T')[0])
   }
 
-  let total = 0
-  let ingested = 0
-  let errors = 0
-
-  // Deduplicate leagues by ID to avoid duplicate API calls
-  const seen = new Set<string>()
-  const uniqueLeagues = TRACKED_LEAGUES.filter(l => {
-    if (seen.has(l.id)) return false
-    seen.add(l.id)
-    return true
-  })
-
   for (const date of dates) {
-    for (const league of uniqueLeagues) {
-      const events = await fetchFixturesForLeague(league.id, date)
-      total += events.length
-
+    for (const league of ESPN_LEAGUES) {
+      const events = await fetchESPNFixturesForLeague(league.slug, date)
       for (const event of events) {
-        try {
-          await upsertFixture(event, league.name, league.country)
-          ingested++
-        } catch {
-          errors++
-        }
+        const before = await prisma.fixture.count()
+        await upsertESPNFixture(event, league.name, league.country)
+        const after = await prisma.fixture.count()
+        if (after > before) added++
       }
-
-      // Small delay to avoid rate limiting
-      await new Promise(r => setTimeout(r, 200))
+      await new Promise(r => setTimeout(r, 150))
     }
   }
 
-  console.log(`[fixtures] Ingested ${ingested}/${total} fixtures for dates: ${dates.join(', ')}`)
-  return { total, ingested, errors, dates }
+  console.log(`[fixtures] ESPN fallback added ${added} gap-fill fixtures`)
+  return { added }
 }
+
+// ─── COMBINED INGESTION: BSD primary + ESPN gap-fill ──────────────────────
+
+export async function ingestFixturesWithFallback(daysAhead: number = 2): Promise<{
+  bsd: { total: number; ingested: number; errors: number }
+  espn: { added: number }
+  totalFixtures: number
+}> {
+  const bsdResult = await ingestFixtures(daysAhead)
+
+  let espnResult = { added: 0 }
+
+  // Trigger ESPN fallback only if BSD coverage looks thin
+  // Threshold: fewer than 15 fixtures across the requested window suggests gaps
+  if (bsdResult.ingested < 15) {
+    console.log('[fixtures] BSD coverage looks thin, running ESPN gap-fill...')
+    espnResult = await fillGapsWithESPN(daysAhead)
+  }
+
+  const totalFixtures = await prisma.fixture.count({
+    where: {
+      matchDate: {
+        gte: new Date(),
+        lte: new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000),
+      },
+    },
+  })
+
+  return { bsd: bsdResult, espn: espnResult, totalFixtures }
+}
+
+// ─── QUERY HELPERS ───────────────────────────────────────────────────────────
 
 export async function getUpcomingFixtures(hours: number = 48) {
   const from = new Date()

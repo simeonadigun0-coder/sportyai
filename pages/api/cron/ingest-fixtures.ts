@@ -4,7 +4,7 @@
 // Can also be triggered manually for testing
 
 import { NextApiRequest, NextApiResponse } from 'next'
-import { ingestFixtures } from '@/lib/fixtures'
+import { ingestFixturesWithFallback } from '@/lib/fixtures'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const authHeader = req.headers.authorization
@@ -17,7 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const daysAhead = req.query.days ? parseInt(req.query.days as string) : 2
-    const result = await ingestFixtures(daysAhead)
+    const result = await ingestFixturesWithFallback(daysAhead)
 
     return res.status(200).json({
       success: true,
