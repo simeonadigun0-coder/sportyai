@@ -1,13 +1,12 @@
 // lib/slip-optimizer.ts
 // Module 6 — Slip Optimizer Engine
-// Replaces the old groq.ts analysis flow
-// Flow: Fetch Stats → Calculate Groove Score → Apply Market Rules → AI Explanation
+// REWRITTEN: Target-odds-aware selection
+// Flow: Score all games → Sort by Groove Score → Greedily select toward targetOdds → AI explanation
 
 import { prisma } from './db/prisma'
 import { calculateGrooveScore } from './confidence'
-import { applyMarketRule, resolveMarketKey } from './market-rules'
+import { resolveMarketKey } from './market-rules'
 import { fetchStatsByTeamSearch, getStatisticsForFixture, getH2HRecord } from './statistics'
-import { getFixtureById } from './fixtures'
 import { SportyBetGame } from './sportybet'
 import Groq from 'groq-sdk'
 
@@ -19,22 +18,12 @@ export interface OptimizedGame extends SportyBetGame {
   grooveScore: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   confidence: number
-  decision: 'KEEP' | 'REPLACE' | 'REMOVE'
+  decision: 'KEEP' | 'REMOVE'
   reason: string
   formSummary: string
   valueEdge: number
   dataQuality: 'FULL' | 'PARTIAL' | 'MINIMAL'
   keep: boolean
-
-  // Replacement fields
-  replaced?: boolean
-  originalPick?: string
-  originalMarket?: string
-  originalOdds?: number
-  replacedPick?: string
-  replacedMarketDesc?: string
-  replacedOdds?: number
-  replacementReason?: string
 }
 
 export interface SlipOptimizationResult {
@@ -53,7 +42,6 @@ export interface SlipOptimizationResult {
 
 async function ensureFixtureInDB(game: SportyBetGame): Promise<string | null> {
   try {
-    // Try to find by team names
     const existing = await prisma.fixture.findFirst({
       where: {
         homeTeam: { contains: game.homeTeam.split(' ')[0], mode: 'insensitive' },
@@ -67,7 +55,6 @@ async function ensureFixtureInDB(game: SportyBetGame): Promise<string | null> {
 
     if (existing) return existing.id
 
-    // Create minimal fixture record
     const created = await prisma.fixture.create({
       data: {
         fixtureId: game.eventId,
@@ -89,87 +76,201 @@ async function ensureFixtureInDB(game: SportyBetGame): Promise<string | null> {
   }
 }
 
-// ─── AI EXPLANATION GENERATOR ─────────────────────────────────────────────
+// ─── SCORE A SINGLE GAME ──────────────────────────────────────────────────
 
-interface GameForAI {
+interface ScoredGame {
   game: SportyBetGame
   grooveScore: number
-  decision: 'KEEP' | 'REPLACE' | 'REMOVE'
-  safeAlternative: string | null
-  formSummary: string
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  confidence: number
   valueEdge: number
-  ruleReason: string
+  dataQuality: 'FULL' | 'PARTIAL' | 'MINIMAL'
+  formSummary: string
 }
 
+async function scoreGame(game: SportyBetGame): Promise<ScoredGame> {
+  const fallback: ScoredGame = {
+    game,
+    grooveScore: 50,
+    riskLevel: 'MEDIUM',
+    confidence: 50,
+    valueEdge: 0,
+    dataQuality: 'MINIMAL',
+    formSummary: 'No data available',
+  }
+
+  try {
+    const fixtureDbId = await ensureFixtureInDB(game)
+
+    let stats = null
+    let h2h = null
+
+    if (fixtureDbId) {
+      stats = await getStatisticsForFixture(fixtureDbId)
+
+      if (!stats) {
+        await fetchStatsByTeamSearch(
+          fixtureDbId,
+          game.homeTeam,
+          game.awayTeam,
+          `home_${game.eventId}`,
+          `away_${game.eventId}`
+        )
+        stats = await getStatisticsForFixture(fixtureDbId)
+      }
+
+      h2h = await getH2HRecord(`home_${game.eventId}`, `away_${game.eventId}`)
+    }
+
+    const scoreOutput = await calculateGrooveScore({
+      pick: game.pick,
+      market: game.market,
+      odds: game.odds,
+      stats,
+      h2h,
+    })
+
+    const formSummary = stats
+      ? `${game.homeTeam} W${stats.homeWins}D${stats.homeDraws}L${stats.homeLosses} (${stats.homeAvgScored.toFixed(1)} scored/game) | ${game.awayTeam} W${stats.awayWins}D${stats.awayDraws}L${stats.awayLosses} (${stats.awayAvgScored.toFixed(1)} scored/game) | BSD: Home ${stats.probHome}% Draw ${stats.probDraw}% Away ${stats.probAway}%`
+      : 'No statistical data available'
+
+    return {
+      game,
+      grooveScore: scoreOutput.grooveScore,
+      riskLevel: scoreOutput.riskLevel,
+      confidence: scoreOutput.confidence,
+      valueEdge: scoreOutput.valueEdge,
+      dataQuality: scoreOutput.dataQuality,
+      formSummary,
+    }
+  } catch {
+    return fallback
+  }
+}
+
+// ─── TARGET ODDS SELECTION ────────────────────────────────────────────────
+// Sorts by Groove Score descending, greedily adds games until
+// combined odds reaches targetOdds. Returns selected + rejected sets.
+
+function selectGamesForTarget(
+  scored: ScoredGame[],
+  targetOdds: number
+): { kept: ScoredGame[]; removed: ScoredGame[] } {
+  // Sort best Groove Score first
+  const sorted = [...scored].sort((a, b) => b.grooveScore - a.grooveScore)
+
+  const kept: ScoredGame[] = []
+  const removed: ScoredGame[] = []
+  let combinedOdds = 1.0
+
+  for (const s of sorted) {
+    const projectedOdds = combinedOdds * s.game.odds
+
+    if (combinedOdds >= targetOdds) {
+      // Already hit target — remove the rest
+      removed.push(s)
+      continue
+    }
+
+    // Adding this game won't overshoot too badly, or we haven't hit target yet
+    kept.push(s)
+    combinedOdds = projectedOdds
+
+    // If we've hit or exceeded target, remaining games get removed
+    if (combinedOdds >= targetOdds) continue
+  }
+
+  // Edge case: if we used all games and still didn't hit target,
+  // that's fine — return all kept, none removed
+  // Edge case: if even first game alone exceeds target,
+  // just keep that one game
+  if (kept.length > 0 && kept[0].game.odds >= targetOdds) {
+    return {
+      kept: [kept[0]],
+      removed: sorted.slice(1),
+    }
+  }
+
+  return { kept, removed }
+}
+
+// ─── BUILD REASON FOR REMOVED GAME ───────────────────────────────────────
+
+function buildRemoveReason(s: ScoredGame, rank: number, totalKept: number): string {
+  const rankSuffix = rank === 1 ? '1st' : rank === 2 ? '2nd' : rank === 3 ? '3rd' : `${rank}th`
+  return `Ranked ${rankSuffix} lowest Groove Score (${s.grooveScore}/100) among your picks — target odds reached with the top ${totalKept} games`
+}
+
+function buildKeepReason(s: ScoredGame, rank: number): string {
+  const rankSuffix = rank === 1 ? 'highest' : rank === 2 ? '2nd highest' : rank === 3 ? '3rd highest' : `${rank}th highest`
+  if (s.dataQuality === 'MINIMAL') {
+    return `Analysis unavailable — kept by default (Groove Score ${s.grooveScore}/100)`
+  }
+  return `${rankSuffix} Groove Score (${s.grooveScore}/100) among your picks${s.valueEdge > 0 ? ` with +${s.valueEdge}% value edge` : ''}`
+}
+
+// ─── AI EXPLANATION GENERATOR ─────────────────────────────────────────────
+
 async function generateAIExplanations(
-  games: GameForAI[],
-  allowSwitching: boolean,
-  username: string
-): Promise<Map<string, { reason: string; replacedPick?: string; replacedMarket?: string; replacementReason?: string }>> {
-  const results = new Map<string, { reason: string; replacedPick?: string; replacedMarket?: string; replacementReason?: string }>()
+  kept: ScoredGame[],
+  removed: ScoredGame[],
+  username: string,
+  targetOdds: number,
+  newOdds: number
+): Promise<Map<string, string>> {
+  const results = new Map<string, string>()
+  const all = [...kept, ...removed]
+  if (all.length === 0) return results
 
-  if (games.length === 0) return results
-
-  const gameLines = games.map((gd, i) => `
+  const gameLines = all.map((s, i) => `
 ── GAME ${i + 1} ──────────────────────────────
-Event ID: ${gd.game.eventId}
-Match: ${gd.game.homeTeam} vs ${gd.game.awayTeam}
-League: ${gd.game.league}
-Pick: ${gd.game.pick} | Market: ${gd.game.market} | Odds: ${gd.game.odds}
-Groove Score: ${gd.grooveScore}/100
-Decision: ${gd.decision}
-Data Summary: ${gd.formSummary}
-Value Edge: ${gd.valueEdge > 0 ? '+' : ''}${gd.valueEdge}%
-Rule Reason: ${gd.ruleReason}
-${gd.safeAlternative ? `Safe Alternative: ${gd.safeAlternative}` : ''}`
-  ).join('\n')
+Match: ${s.game.homeTeam} vs ${s.game.awayTeam}
+Pick: ${s.game.pick} | Market: ${s.game.market} | Odds: ${s.game.odds}
+Groove Score: ${s.grooveScore}/100
+Decision: ${kept.includes(s) ? 'KEEP' : 'REMOVE'}
+Form: ${s.formSummary}`).join('\n')
 
   const prompt = `You are a sharp football betting analyst for Groove Slip, a Nigerian slip optimisation platform.
 
-${allowSwitching
-    ? `For each game below, write a specific 1-2 sentence reason explaining the decision using the actual data. If decision is REPLACE, suggest what to replace with based on the safe alternative provided. Reference actual numbers — Groove Score, value edge, form.`
-    : `For each game below, write a specific 1-2 sentence reason explaining why the pick is kept or removed. Reference actual numbers — Groove Score, value edge, form. Never be vague.`}
+The user had ${all.length} games. We kept ${kept.length} games to reach target odds of ${targetOdds}x (actual: ${newOdds.toFixed(2)}x). Removed games had lower Groove Scores.
+
+Write one specific 1-sentence reason per game referencing its Groove Score and decision. Be direct.
 
 ${gameLines}
 
 Return ONLY a valid JSON array, one object per game in the same order:
-[{"eventId":"ID","reason":"Specific data-backed reason","replacedPick":null,"replacedMarket":null,"replacementReason":null}]
+[{"eventId":"${all[0]?.game.eventId}","reason":"..."}]
 
 Rules:
-- reason must reference actual numbers (Groove Score, odds, probabilities)
-- Never say "insufficient data" — say what the data actually shows
-- replacedPick and replacedMarket only filled if decision is REPLACE and allowSwitching is ${allowSwitching}
-- No markdown, no preamble, valid JSON only`
+- Reference actual Groove Score numbers
+- For KEEP: explain why it qualified
+- For REMOVE: explain it was outscored by kept picks
+- No markdown, valid JSON only`
 
   try {
     const completion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [
-        {
-          role: 'system',
-          content: 'You are a football betting analyst API. Output ONLY valid JSON array. No markdown. No explanation.',
-        },
+        { role: 'system', content: 'Football betting analyst API. Output ONLY valid JSON array. No markdown.' },
         { role: 'user', content: prompt },
       ],
       temperature: 0.15,
-      max_tokens: 500 * games.length,
+      max_tokens: 80 * all.length,
     })
 
     const raw = completion.choices[0]?.message?.content || '[]'
     const clean = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
     const start = clean.indexOf('['), end = clean.lastIndexOf(']')
-    if (start === -1 || end === -1) throw new Error('No JSON array found')
+    if (start === -1 || end === -1) throw new Error('No JSON array')
 
     const parsed = JSON.parse(clean.substring(start, end + 1))
-    for (const r of parsed) {
-      if (r.eventId) results.set(r.eventId, r)
-    }
-  } catch (err) {
-    console.error('[slip-optimizer] AI explanation failed:', err)
-    // Fallback — use rule reasons
-    for (const gd of games) {
-      results.set(gd.game.eventId, { reason: gd.ruleReason })
-    }
+    all.forEach((s, i) => {
+      if (parsed[i]?.reason) results.set(s.game.eventId, parsed[i].reason)
+    })
+  } catch {
+    // Fallback — use rule-based reasons
+    kept.forEach((s, i) => results.set(s.game.eventId, buildKeepReason(s, i + 1)))
+    removed.forEach((s, i) => results.set(s.game.eventId, buildRemoveReason(s, i + 1, kept.length)))
   }
 
   return results
@@ -182,24 +283,20 @@ async function generateSummary(
   total: number,
   kept: number,
   removed: number,
-  replaced: number,
   newOdds: number,
   targetOdds: number,
   avgGrooveScore: number
 ): Promise<string> {
-  const fallback = `Hi ${username}, analysed ${total} games and kept ${kept} with a Groove Score of ${avgGrooveScore}/100 at ${newOdds.toFixed(2)} odds. Cut ${removed} risky picks${replaced > 0 ? ` and swapped ${replaced} for safer options` : ''}.`
+  const fallback = `Hi ${username}, after analysing ${total} games, our engine kept the best ${kept} picks with a combined Groove Score of ${avgGrooveScore}/100 at ${newOdds.toFixed(2)} odds — closest to your target of ${targetOdds}x. Cut ${removed} lower-scoring picks.`
 
   try {
     const completion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [
-        {
-          role: 'system',
-          content: 'Write 2-sentence betting summaries for Nigerian punters. Casual, warm, direct. No markdown. Exactly 2 sentences.',
-        },
+        { role: 'system', content: 'Write 2-sentence betting summaries for Nigerian punters. Casual, warm, direct. No markdown. Exactly 2 sentences.' },
         {
           role: 'user',
-          content: `Write exactly 2 sentences for ${username}. Start with "Hi ${username},". Facts: ${total} games analysed, ${kept} kept at ${newOdds.toFixed(2)} odds (target was ${targetOdds}), avg Groove Score ${avgGrooveScore}/100, cut ${removed} risky picks${replaced > 0 ? `, swapped ${replaced} for safer options` : ''}.`,
+          content: `Write exactly 2 sentences for ${username}. Start with "Hi ${username},". Facts: ${total} games analysed, kept ${kept} best picks at ${newOdds.toFixed(2)} odds (target was ${targetOdds}x), avg Groove Score ${avgGrooveScore}/100, cut ${removed} lower-scoring picks.`,
         },
       ],
       temperature: 0.5,
@@ -221,148 +318,52 @@ export async function optimizeSlip(
   username: string = 'Champ'
 ): Promise<SlipOptimizationResult> {
 
-  const optimizedGames: OptimizedGame[] = []
-  const needsAIExplanation: GameForAI[] = []
+  // Phase 1: Score all games concurrently (in batches to avoid overwhelming BSD)
+  const BATCH = 5
+  const allScored: ScoredGame[] = []
 
-  // Phase 1: For each game — fetch stats, calculate Groove Score, apply market rules
-  for (const game of games) {
-    try {
-      // Ensure fixture exists in DB
-      const fixtureDbId = await ensureFixtureInDB(game)
-
-      /// Fetch statistics — slip optimizer analyses SportyBet games which
-      // don't have real BSD event IDs, so we use team-name search instead
-      let stats = null
-      let h2h = null
-
-      if (fixtureDbId) {
-        stats = await getStatisticsForFixture(fixtureDbId)
-
-        if (!stats) {
-          await fetchStatsByTeamSearch(
-            fixtureDbId,
-            game.homeTeam,
-            game.awayTeam,
-            `home_${game.eventId}`,
-            `away_${game.eventId}`
-          )
-          stats = await getStatisticsForFixture(fixtureDbId)
-        }
-
-        h2h = await getH2HRecord(`home_${game.eventId}`, `away_${game.eventId}`)
-      }
-      // Calculate Groove Score
-      const scoreOutput = await calculateGrooveScore({
-        pick: game.pick,
-        market: game.market,
-        odds: game.odds,
-        stats,
-        h2h,
-      })
-
-      // Apply market rules
-      const ruleResult = await applyMarketRule(
-        game.pick,
-        game.market,
-        game.odds,
-        scoreOutput.grooveScore,
-        stats,
-        h2h
-      )
-
-      // Build form summary
-      const formSummary = stats
-        ? `${game.homeTeam} W${stats.homeWins}D${stats.homeDraws}L${stats.homeLosses} (${stats.homeAvgScored.toFixed(1)} scored/game) | ${game.awayTeam} W${stats.awayWins}D${stats.awayDraws}L${stats.awayLosses} (${stats.awayAvgScored.toFixed(1)} scored/game) | BSD: Home ${stats.probHome}% Draw ${stats.probDraw}% Away ${stats.probAway}%`
-        : 'No statistical data available'
-
-      const optimized: OptimizedGame = {
-        ...game,
-        grooveScore: scoreOutput.grooveScore,
-        riskLevel: scoreOutput.riskLevel,
-        confidence: scoreOutput.confidence,
-        decision: ruleResult.decision,
-        reason: ruleResult.reason,
-        formSummary,
-        valueEdge: scoreOutput.valueEdge,
-        dataQuality: scoreOutput.dataQuality,
-        keep: ruleResult.decision !== 'REMOVE',
-      }
-
-      optimizedGames.push(optimized)
-
-      // Queue for AI explanation
-      needsAIExplanation.push({
-        game,
-        grooveScore: scoreOutput.grooveScore,
-        decision: ruleResult.decision,
-        safeAlternative: ruleResult.safeAlternative,
-        formSummary,
-        valueEdge: scoreOutput.valueEdge,
-        ruleReason: ruleResult.reason,
-      })
-
-    } catch (err) {
-      console.error(`[slip-optimizer] Error processing ${game.homeTeam} vs ${game.awayTeam}:`, err)
-
-      // Add with minimal data
-      optimizedGames.push({
-        ...game,
-        grooveScore: 50,
-        riskLevel: 'MEDIUM',
-        confidence: 50,
-        decision: 'KEEP',
-        reason: 'Analysis unavailable — kept by default',
-        formSummary: 'No data available',
-        valueEdge: 0,
-        dataQuality: 'MINIMAL',
-        keep: true,
-      })
-    }
+  for (let i = 0; i < games.length; i += BATCH) {
+    const batch = games.slice(i, i + BATCH)
+    const results = await Promise.all(batch.map(g => scoreGame(g)))
+    allScored.push(...results)
+    if (i + BATCH < games.length) await new Promise(r => setTimeout(r, 200))
   }
 
-  // Phase 2: Get AI explanations for all games
-  const aiExplanations = await generateAIExplanations(
-    needsAIExplanation,
-    allowSwitching,
-    username
-  )
+  // Phase 2: Select best games toward targetOdds
+  const { kept, removed } = selectGamesForTarget(allScored, targetOdds)
 
-  // Phase 3: Apply AI explanations and handle replacements
-  let replacedCount = 0
-  const finalGames = optimizedGames.map(g => {
-    const ai = aiExplanations.get(g.eventId)
-    if (!ai) return g
+  // Phase 3: Get AI explanations
+  const newOdds = kept.reduce((acc, s) => acc * s.game.odds, 1)
+  const aiReasons = await generateAIExplanations(kept, removed, username, targetOdds, newOdds)
 
-    const updated = { ...g, reason: ai.reason || g.reason }
+  // Phase 4: Build final game objects
+  const keptGames: OptimizedGame[] = kept.map((s, i) => ({
+    ...s.game,
+    grooveScore: s.grooveScore,
+    riskLevel: s.riskLevel,
+    confidence: s.confidence,
+    decision: 'KEEP' as const,
+    reason: aiReasons.get(s.game.eventId) || buildKeepReason(s, i + 1),
+    formSummary: s.formSummary,
+    valueEdge: s.valueEdge,
+    dataQuality: s.dataQuality,
+    keep: true,
+  }))
 
-    // Handle replacement
-    if (allowSwitching && g.decision === 'REPLACE' && ai.replacedPick && ai.replacedMarket) {
-      replacedCount++
-      return {
-        ...updated,
-        keep: true,
-        replaced: true,
-        originalPick: g.pick,
-        originalMarket: g.market,
-        originalOdds: g.odds,
-        replacedPick: ai.replacedPick,
-        replacedMarketDesc: ai.replacedMarket,
-        replacedOdds: estimateSaferOdds(g.odds, ai.replacedPick),
-        replacementReason: ai.replacementReason || ai.reason,
-      }
-    }
+  const removedGames: OptimizedGame[] = removed.map((s, i) => ({
+    ...s.game,
+    grooveScore: s.grooveScore,
+    riskLevel: s.riskLevel,
+    confidence: s.confidence,
+    decision: 'REMOVE' as const,
+    reason: aiReasons.get(s.game.eventId) || buildRemoveReason(s, i + 1, kept.length),
+    formSummary: s.formSummary,
+    valueEdge: s.valueEdge,
+    dataQuality: s.dataQuality,
+    keep: false,
+  }))
 
-    return updated
-  })
-
-  // Phase 4: Calculate final odds and stats
-  const keptGames = finalGames.filter(g => g.keep)
-  const removedGames = finalGames.filter(g => !g.keep)
-
-  const newOdds = keptGames.reduce((acc, g) => {
-    const odds = g.replaced ? (g.replacedOdds || g.odds) : g.odds
-    return acc * odds
-  }, 1)
+  const allGames = [...keptGames, ...removedGames]
 
   const avgGrooveScore = keptGames.length > 0
     ? Math.round(keptGames.reduce((acc, g) => acc + g.grooveScore, 0) / keptGames.length)
@@ -376,7 +377,7 @@ export async function optimizeSlip(
         totalGames: games.length,
         keptGames: keptGames.length,
         removedGames: removedGames.length,
-        replacedGames: replacedCount,
+        replacedGames: 0,
         originalOdds: originalTotalOdds,
         newOdds: parseFloat(newOdds.toFixed(2)),
         targetOdds,
@@ -392,14 +393,13 @@ export async function optimizeSlip(
     games.length,
     keptGames.length,
     removedGames.length,
-    replacedCount,
     newOdds,
     targetOdds,
     avgGrooveScore
   )
 
   return {
-    games: finalGames,
+    games: allGames,
     keptGames,
     removedGames,
     originalOdds: parseFloat(originalTotalOdds.toFixed(2)),
@@ -409,15 +409,4 @@ export async function optimizeSlip(
     summary,
     wasFreeTrial: false,
   }
-}
-
-// ─── HELPER ───────────────────────────────────────────────────────────────
-
-function estimateSaferOdds(originalOdds: number, newPick: string): number {
-  const p = newPick.toLowerCase()
-  if (p.includes('double chance')) return Math.max(1.08, parseFloat((1 + (originalOdds - 1) * 0.35).toFixed(2)))
-  if (p.includes('over 0.5')) return 1.10
-  if (p.includes('over 1.5')) return Math.max(1.12, parseFloat((1 + (originalOdds - 1) * 0.30).toFixed(2)))
-  if (p.includes('draw no bet')) return Math.max(1.10, parseFloat((1 + (originalOdds - 1) * 0.40).toFixed(2)))
-  return Math.max(1.08, parseFloat((1 + (originalOdds - 1) * 0.45).toFixed(2)))
 }
