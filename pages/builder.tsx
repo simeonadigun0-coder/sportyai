@@ -70,10 +70,9 @@ export default function BuilderPage() {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
-          tier: tierFromRisk(riskLevel),
-          legs: 0,
-          daysAhead: daysAheadFromRange(dateRange),
-        }),
+  tier: tierFromRisk(riskLevel),
+  dateRange,
+}),
       })
       const data = await res.json()
       if (!res.ok) {
