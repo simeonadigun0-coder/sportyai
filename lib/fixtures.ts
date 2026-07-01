@@ -89,7 +89,7 @@ async function fetchBSDEvents(dateFrom: string, dateTo: string): Promise<BSDEven
   let offset = 0
   const limit = 200
   let hasMore = true
-  let pageGuard = 0 // safety against infinite loops
+  let pageGuard = 0
 
   while (hasMore && pageGuard < 20) {
     try {
@@ -199,8 +199,6 @@ export async function ingestFixtures(daysAhead: number = 2): Promise<{
 }
 
 // ─── ESPN FALLBACK ───────────────────────────────────────────────────────────
-// Only used when BSD returns suspiciously few fixtures for the day
-// Covers major leagues as a backup data source
 
 interface ESPNEvent {
   id: string
@@ -249,7 +247,6 @@ async function upsertESPNFixture(event: ESPNEvent, leagueName: string, country: 
 
     const espnId = `espn_${event.id}`
 
-    // Skip if a fixture with similar teams already exists from BSD for the same day
     const existing = await prisma.fixture.findFirst({
       where: {
         homeTeam: { contains: home.team.displayName.split(' ')[0], mode: 'insensitive' },
@@ -261,7 +258,7 @@ async function upsertESPNFixture(event: ESPNEvent, leagueName: string, country: 
       },
     })
 
-    if (existing) return // BSD already has this fixture, skip duplicate
+    if (existing) return
 
     await prisma.fixture.upsert({
       where: { fixtureId: espnId },
@@ -320,8 +317,6 @@ export async function ingestFixturesWithFallback(daysAhead: number = 2): Promise
 
   let espnResult = { added: 0 }
 
-  // Trigger ESPN fallback only if BSD coverage looks thin
-  // Threshold: fewer than 15 fixtures across the requested window suggests gaps
   if (bsdResult.ingested < 15) {
     console.log('[fixtures] BSD coverage looks thin, running ESPN gap-fill...')
     espnResult = await fillGapsWithESPN(daysAhead)
@@ -356,14 +351,16 @@ export async function getUpcomingFixtures(hours: number = 48) {
 }
 
 export async function getTodayFixtures() {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
+  // FIX: use current moment (not midnight) as lower bound
+  // and filter to UPCOMING only — no finished or live games
+  const now = new Date()
   const end = new Date()
   end.setHours(23, 59, 59, 999)
 
   return prisma.fixture.findMany({
     where: {
-      matchDate: { gte: start, lte: end },
+      matchDate: { gte: now, lte: end },
+      status: 'UPCOMING',
     },
     orderBy: { matchDate: 'asc' },
     include: { statistics: true },
