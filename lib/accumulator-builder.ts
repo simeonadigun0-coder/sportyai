@@ -1,7 +1,7 @@
 // lib/accumulator-builder.ts
 // Module 8 — Accumulator Builder Engine
-// REDESIGNED: Returns ALL fixtures for the date range with predictions and probability %
-// Risk level = recommendation threshold, not a filter that hides games
+// REDESIGNED: Returns ALL fixtures that qualify for the selected risk tier
+// No combinations, no splitting — user sees every qualifying game in one flat list
 
 import { prisma } from './db/prisma'
 import { calculateGrooveScore } from './confidence'
@@ -29,25 +29,16 @@ export interface AccumulatorPick {
   confidence: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   valueEdge: number
-  probability: number   // real or inferred probability %
+  probability: number
   reason: string
-  isRecommended: boolean  // meets the selected risk tier threshold
   dataQuality: 'FULL' | 'PARTIAL' | 'MINIMAL'
 }
 
-export interface SuggestedAccumulator {
-  legs: AccumulatorPick[]
-  totalOdds: number
-  avgGrooveScore: number
-  legsCount: number
-  potentialReturn: number
-}
-
 export interface AccumulatorBuilderResult {
-  allPicks: AccumulatorPick[]
-  recommendedPicks: AccumulatorPick[]
-  suggestedAccumulator: SuggestedAccumulator | null
+  picks: AccumulatorPick[]
   fixturesScanned: number
+  tier: RiskTier
+  minGrooveScore: number
   summary: string
 }
 
@@ -56,13 +47,14 @@ export interface AccumulatorBuilderResult {
 const TIER_CONFIG: Record<RiskTier, {
   minGrooveScore: number
   label: string
+  description: string
 }> = {
-  SAFE:       { minGrooveScore: 72, label: 'Safe' },
-  BALANCED:   { minGrooveScore: 65, label: 'Balanced' },
-  AGGRESSIVE: { minGrooveScore: 55, label: 'Aggressive' },
+  SAFE:       { minGrooveScore: 72, label: 'Low Risk',    description: 'Groove Score 72+' },
+  BALANCED:   { minGrooveScore: 65, label: 'Medium Risk', description: 'Groove Score 65+' },
+  AGGRESSIVE: { minGrooveScore: 55, label: 'High Risk',   description: 'Groove Score 55+' },
 }
 
-// ─── CANDIDATE PICKS — best pick per fixture ──────────────────────────────
+// ─── CANDIDATE PICKS ──────────────────────────────────────────────────────
 
 const CANDIDATE_PICKS = [
   { pick: 'Home',      market: '1X2' },
@@ -101,14 +93,14 @@ function estimateOdds(
   return 0
 }
 
-// ─── SCORE ALL PICKS FOR A FIXTURE, RETURN BEST ───────────────────────────
+// ─── GET BEST QUALIFYING PICK FOR A FIXTURE ───────────────────────────────
+// Returns the best pick IF it meets the tier's Groove Score threshold.
+// Returns null if no pick qualifies.
 
-async function getBestPickForFixture(
+async function getBestQualifyingPick(
   fixture: Awaited<ReturnType<typeof getTodayFixtures>>[0],
-  tier: RiskTier
+  minGrooveScore: number
 ): Promise<AccumulatorPick | null> {
-  const config = TIER_CONFIG[tier]
-
   let stats = fixture.statistics
   if (!stats) {
     await fetchAndStoreStatistics(
@@ -138,9 +130,11 @@ async function getBestPickForFixture(
         h2h,
       })
 
+      // Only consider picks that meet the tier threshold
+      if (score.grooveScore < minGrooveScore) continue
       if (score.grooveScore <= bestScore) continue
-      bestScore = score.grooveScore
 
+      bestScore = score.grooveScore
       bestPick = {
         fixtureId: fixture.id,
         homeTeam: fixture.homeTeam,
@@ -157,33 +151,9 @@ async function getBestPickForFixture(
         valueEdge: score.valueEdge,
         probability: score.realProbability > 0 ? score.realProbability : score.impliedProbability,
         reason: '',
-        isRecommended: score.grooveScore >= config.minGrooveScore,
         dataQuality: score.dataQuality,
       }
     } catch { /* skip */ }
-  }
-
-  // If no picks scored at all, still return a basic entry for the fixture
-  if (!bestPick) {
-    bestPick = {
-      fixtureId: fixture.id,
-      homeTeam: fixture.homeTeam,
-      awayTeam: fixture.awayTeam,
-      league: fixture.league,
-      country: fixture.country,
-      matchDate: fixture.matchDate,
-      pick: 'Home',
-      market: '1X2',
-      odds: 2.0,
-      grooveScore: 50,
-      confidence: 50,
-      riskLevel: 'MEDIUM',
-      valueEdge: 0,
-      probability: 50,
-      reason: 'Insufficient data for analysis',
-      isRecommended: false,
-      dataQuality: 'MINIMAL',
-    }
   }
 
   return bestPick
@@ -194,12 +164,16 @@ async function getBestPickForFixture(
 async function addAIReasons(picks: AccumulatorPick[]): Promise<AccumulatorPick[]> {
   if (picks.length === 0) return picks
 
-  // Only generate reasons for recommended picks to save tokens
-  const recommended = picks.filter(p => p.isRecommended && p.dataQuality !== 'MINIMAL')
-  if (recommended.length === 0) return picks
+  const withData = picks.filter(p => p.dataQuality !== 'MINIMAL').slice(0, 15)
+  if (withData.length === 0) {
+    return picks.map(p => ({
+      ...p,
+      reason: `Groove Score ${p.grooveScore}/100 — ${p.probability.toFixed(0)}% estimated probability`
+    }))
+  }
 
-  const lines = recommended.map((p, i) =>
-    `${i + 1}. ${p.homeTeam} vs ${p.awayTeam} (${p.league}) — ${p.pick} @ ${p.odds} | Groove Score: ${p.grooveScore}/100 | Probability: ${p.probability.toFixed(0)}%`
+  const lines = withData.map((p, i) =>
+    `${i + 1}. ${p.homeTeam} vs ${p.awayTeam} (${p.league}) — ${p.pick} | Score: ${p.grooveScore}/100 | Prob: ${p.probability.toFixed(0)}%`
   ).join('\n')
 
   try {
@@ -209,11 +183,11 @@ async function addAIReasons(picks: AccumulatorPick[]): Promise<AccumulatorPick[]
         { role: 'system', content: 'Football analyst. Output ONLY valid JSON array. No markdown.' },
         {
           role: 'user',
-          content: `Write one short sentence per pick (max 15 words) referencing Groove Score and probability.\n\n${lines}\n\nReturn ONLY: [{"index":0,"reason":"..."}]`,
+          content: `Write one short sentence per pick (max 12 words) referencing Groove Score and probability. No mention of odds.\n\n${lines}\n\nReturn ONLY: [{"index":0,"reason":"..."}]`,
         },
       ],
       temperature: 0.15,
-      max_tokens: 40 * recommended.length + 50,
+      max_tokens: 35 * withData.length + 50,
     })
 
     const raw = completion.choices[0]?.message?.content || '[]'
@@ -223,15 +197,15 @@ async function addAIReasons(picks: AccumulatorPick[]): Promise<AccumulatorPick[]
 
     const parsed = JSON.parse(clean.substring(start, end + 1))
     const reasonMap = new Map<string, string>()
-    recommended.forEach((p, i) => {
-      reasonMap.set(p.fixtureId, parsed[i]?.reason || `Groove Score ${p.grooveScore}/100 — ${p.probability.toFixed(0)}% probability`)
+    withData.forEach((p, i) => {
+      reasonMap.set(p.fixtureId, parsed[i]?.reason || `Groove Score ${p.grooveScore}/100`)
     })
 
     return picks.map(p => ({
       ...p,
       reason: reasonMap.get(p.fixtureId) ||
         (p.dataQuality === 'MINIMAL'
-          ? `Estimated ${p.probability.toFixed(0)}% probability based on market data`
+          ? `${p.probability.toFixed(0)}% estimated probability — limited data available`
           : `Groove Score ${p.grooveScore}/100 — ${p.probability.toFixed(0)}% probability`
         )
     }))
@@ -243,42 +217,22 @@ async function addAIReasons(picks: AccumulatorPick[]): Promise<AccumulatorPick[]
   }
 }
 
-// ─── BUILD SUGGESTED ACCUMULATOR FROM RECOMMENDED PICKS ───────────────────
-
-function buildSuggestedAccumulator(
-  recommended: AccumulatorPick[]
-): SuggestedAccumulator | null {
-  if (recommended.length < 2) return null
-
-  // Sort by Groove Score, take top picks
-  const sorted = [...recommended].sort((a, b) => b.grooveScore - a.grooveScore)
-  const legs = sorted.slice(0, Math.min(5, sorted.length))
-
-  const totalOdds = legs.reduce((acc, l) => acc * l.odds, 1)
-  const avgGrooveScore = Math.round(legs.reduce((acc, l) => acc + l.grooveScore, 0) / legs.length)
-
-  return {
-    legs,
-    totalOdds: parseFloat(totalOdds.toFixed(2)),
-    avgGrooveScore,
-    legsCount: legs.length,
-    potentialReturn: parseFloat((1000 * totalOdds).toFixed(0)),
-  }
-}
-
 // ─── SAVE TO DB ───────────────────────────────────────────────────────────
 
-async function saveToDb(userId: string, suggested: SuggestedAccumulator): Promise<void> {
+async function saveToDb(userId: string, tier: RiskTier, picks: AccumulatorPick[]): Promise<void> {
+  if (picks.length === 0) return
   try {
+    const totalOdds = picks.reduce((acc, p) => acc * p.odds, 1)
+    const avgScore = Math.round(picks.reduce((acc, p) => acc + p.grooveScore, 0) / picks.length)
     await prisma.accumulatorBuild.create({
       data: {
         userId,
-        targetOdds: suggested.totalOdds,
-        actualOdds: suggested.totalOdds,
-        riskLevel: suggested.avgGrooveScore >= 72 ? 'LOW' : suggested.avgGrooveScore >= 65 ? 'MEDIUM' : 'HIGH',
-        legsCount: suggested.legsCount,
-        avgGrooveScore: suggested.avgGrooveScore,
-        picks: suggested.legs as unknown as object[],
+        targetOdds: totalOdds,
+        actualOdds: totalOdds,
+        riskLevel: tier === 'SAFE' ? 'LOW' : tier === 'BALANCED' ? 'MEDIUM' : 'HIGH',
+        legsCount: picks.length,
+        avgGrooveScore: avgScore,
+        picks: picks as unknown as object[],
       },
     })
   } catch { /* non-critical */ }
@@ -292,55 +246,54 @@ export async function buildAccumulators(
   daysAhead: number = 1,
   userId?: string
 ): Promise<AccumulatorBuilderResult> {
+  const config = TIER_CONFIG[tier]
+
   const fixtures = daysAhead <= 1
     ? await getTodayFixtures()
     : await getUpcomingFixtures(daysAhead * 24)
 
   if (fixtures.length === 0) {
     return {
-      allPicks: [],
-      recommendedPicks: [],
-      suggestedAccumulator: null,
+      picks: [],
       fixturesScanned: 0,
+      tier,
+      minGrooveScore: config.minGrooveScore,
       summary: 'No fixtures available for the selected date range.',
     }
   }
 
-  // Score all fixtures in batches
-  const allPicks: AccumulatorPick[] = []
+  // Score all fixtures, keep only those that meet the tier threshold
+  const qualifyingPicks: AccumulatorPick[] = []
   const BATCH = 5
 
   for (let i = 0; i < fixtures.length; i += BATCH) {
     const batch = fixtures.slice(i, i + BATCH)
-    const results = await Promise.all(batch.map(f => getBestPickForFixture(f, tier)))
-    allPicks.push(...results.filter((p): p is AccumulatorPick => p !== null))
+    const results = await Promise.all(
+      batch.map(f => getBestQualifyingPick(f, config.minGrooveScore))
+    )
+    qualifyingPicks.push(...results.filter((p): p is AccumulatorPick => p !== null))
     await new Promise(r => setTimeout(r, 200))
   }
 
-  // Sort: recommended first (by Groove Score), then others (by Groove Score)
-  allPicks.sort((a, b) => {
-    if (a.isRecommended !== b.isRecommended) return a.isRecommended ? -1 : 1
-    return b.grooveScore - a.grooveScore
-  })
+  // Sort by Groove Score descending
+  qualifyingPicks.sort((a, b) => b.grooveScore - a.grooveScore)
 
-  // Add AI reasons for recommended picks
-  const picksWithReasons = await addAIReasons(allPicks)
+  // Add AI reasons
+  const picksWithReasons = await addAIReasons(qualifyingPicks)
 
-  const recommendedPicks = picksWithReasons.filter(p => p.isRecommended)
-  const suggestedAccumulator = buildSuggestedAccumulator(recommendedPicks)
-
-  if (userId && suggestedAccumulator) {
-    await saveToDb(userId, suggestedAccumulator)
+  if (userId && picksWithReasons.length > 0) {
+    await saveToDb(userId, tier, picksWithReasons)
   }
 
-  const config = TIER_CONFIG[tier]
-  const summary = `Found ${allPicks.length} fixtures for your selected range. ${recommendedPicks.length} meet the ${config.label} threshold (Groove Score ${config.minGrooveScore}+).${suggestedAccumulator ? ` Suggested ${suggestedAccumulator.legsCount}-leg accumulator at ${suggestedAccumulator.totalOdds}x odds.` : ''}`
+  const summary = picksWithReasons.length > 0
+    ? `Found ${picksWithReasons.length} ${config.label} picks from ${fixtures.length} fixtures (${config.description}). All sorted by Groove Score.`
+    : `No fixtures met the ${config.label} threshold (${config.description}) for this date range. Try Medium or High Risk instead.`
 
   return {
-    allPicks: picksWithReasons,
-    recommendedPicks,
-    suggestedAccumulator,
+    picks: picksWithReasons,
     fixturesScanned: fixtures.length,
+    tier,
+    minGrooveScore: config.minGrooveScore,
     summary,
   }
 }
