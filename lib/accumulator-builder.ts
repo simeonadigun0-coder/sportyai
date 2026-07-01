@@ -1,5 +1,7 @@
 // lib/accumulator-builder.ts
 // Module 8 — Accumulator Builder Engine
+// REDESIGNED: Returns ALL fixtures for the date range with predictions and probability %
+// Risk level = recommendation threshold, not a filter that hides games
 
 import { prisma } from './db/prisma'
 import { calculateGrooveScore } from './confidence'
@@ -13,7 +15,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export type RiskTier = 'SAFE' | 'BALANCED' | 'AGGRESSIVE'
 
-export interface AccumulatorLeg {
+export interface AccumulatorPick {
   fixtureId: string
   homeTeam: string
   awayTeam: string
@@ -27,23 +29,24 @@ export interface AccumulatorLeg {
   confidence: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   valueEdge: number
+  probability: number   // real or inferred probability %
   reason: string
+  isRecommended: boolean  // meets the selected risk tier threshold
+  dataQuality: 'FULL' | 'PARTIAL' | 'MINIMAL'
 }
 
-export interface Accumulator {
-  id: string
-  legs: AccumulatorLeg[]
+export interface SuggestedAccumulator {
+  legs: AccumulatorPick[]
   totalOdds: number
   avgGrooveScore: number
-  avgConfidence: number
-  riskTier: RiskTier
   legsCount: number
   potentialReturn: number
-  summary: string
 }
 
 export interface AccumulatorBuilderResult {
-  accumulators: Accumulator[]
+  allPicks: AccumulatorPick[]
+  recommendedPicks: AccumulatorPick[]
+  suggestedAccumulator: SuggestedAccumulator | null
   fixturesScanned: number
   summary: string
 }
@@ -52,51 +55,26 @@ export interface AccumulatorBuilderResult {
 
 const TIER_CONFIG: Record<RiskTier, {
   minGrooveScore: number
-  maxOddsPerLeg: number
-  minOddsPerLeg: number
-  targetMinOdds: number
-  targetMaxOdds: number
-  preferredMarkets: string[]
+  label: string
 }> = {
-  SAFE: {
-    minGrooveScore: 72,
-    maxOddsPerLeg: 1.80,
-    minOddsPerLeg: 1.15,
-    targetMinOdds: 2.0,
-    targetMaxOdds: 8.0,
-    preferredMarkets: ['double chance', 'draw no bet', 'over/under', 'btts'],
-  },
-  BALANCED: {
-    minGrooveScore: 65,
-    maxOddsPerLeg: 2.50,
-    minOddsPerLeg: 1.20,
-    targetMinOdds: 5.0,
-    targetMaxOdds: 20.0,
-    preferredMarkets: ['1x2', 'double chance', 'over/under', 'btts'],
-  },
-  AGGRESSIVE: {
-    minGrooveScore: 58,
-    maxOddsPerLeg: 4.00,
-    minOddsPerLeg: 1.30,
-    targetMinOdds: 15.0,
-    targetMaxOdds: 100.0,
-    preferredMarkets: ['1x2', 'correct score', 'asian handicap', 'combo'],
-  },
+  SAFE:       { minGrooveScore: 72, label: 'Safe' },
+  BALANCED:   { minGrooveScore: 65, label: 'Balanced' },
+  AGGRESSIVE: { minGrooveScore: 55, label: 'Aggressive' },
 }
 
-// ─── CANDIDATE PICKS ──────────────────────────────────────────────────────
+// ─── CANDIDATE PICKS — best pick per fixture ──────────────────────────────
 
 const CANDIDATE_PICKS = [
-  { pick: 'Home', market: '1X2' },
-  { pick: 'Away', market: '1X2' },
-  { pick: 'Draw', market: '1X2' },
+  { pick: 'Home',      market: '1X2' },
+  { pick: 'Away',      market: '1X2' },
+  { pick: 'Draw',      market: '1X2' },
   { pick: 'Home/Draw', market: 'Double Chance' },
   { pick: 'Draw/Away', market: 'Double Chance' },
-  { pick: 'Over 1.5', market: 'Over/Under' },
-  { pick: 'Over 2.5', market: 'Over/Under' },
+  { pick: 'Over 1.5',  market: 'Over/Under' },
+  { pick: 'Over 2.5',  market: 'Over/Under' },
   { pick: 'Under 2.5', market: 'Over/Under' },
-  { pick: 'Yes', market: 'BTTS' },
-  { pick: 'No', market: 'BTTS' },
+  { pick: 'Yes',       market: 'BTTS' },
+  { pick: 'No',        market: 'BTTS' },
 ]
 
 function estimateOdds(
@@ -109,9 +87,9 @@ function estimateOdds(
   const m = market.toLowerCase()
 
   if (m === '1x2') {
-    if (p === 'home') return stats.oddsHome || (stats.probHome ? parseFloat((100 / stats.probHome).toFixed(2)) : 0)
-    if (p === 'draw') return stats.oddsDraw || (stats.probDraw ? parseFloat((100 / stats.probDraw).toFixed(2)) : 0)
-    if (p === 'away') return stats.oddsAway || (stats.probAway ? parseFloat((100 / stats.probAway).toFixed(2)) : 0)
+    if (p === 'home') return stats.oddsHome || (stats.probHome ? parseFloat((100 / Math.max(stats.probHome, 1)).toFixed(2)) : 0)
+    if (p === 'draw') return stats.oddsDraw || (stats.probDraw ? parseFloat((100 / Math.max(stats.probDraw, 1)).toFixed(2)) : 0)
+    if (p === 'away') return stats.oddsAway || (stats.probAway ? parseFloat((100 / Math.max(stats.probAway, 1)).toFixed(2)) : 0)
   }
   if (p === 'home/draw') return stats.oddsHome ? Math.max(1.10, stats.oddsHome * 0.55) : 1.30
   if (p === 'draw/away') return stats.oddsAway ? Math.max(1.10, stats.oddsAway * 0.60) : 1.40
@@ -123,12 +101,12 @@ function estimateOdds(
   return 0
 }
 
-// ─── GET BEST PICK FOR FIXTURE ────────────────────────────────────────────
+// ─── SCORE ALL PICKS FOR A FIXTURE, RETURN BEST ───────────────────────────
 
 async function getBestPickForFixture(
   fixture: Awaited<ReturnType<typeof getTodayFixtures>>[0],
   tier: RiskTier
-): Promise<AccumulatorLeg | null> {
+): Promise<AccumulatorPick | null> {
   const config = TIER_CONFIG[tier]
 
   let stats = fixture.statistics
@@ -142,36 +120,28 @@ async function getBestPickForFixture(
     stats = await getStatisticsForFixture(fixture.id)
   }
 
-  if (!stats) return null
-
   const h2h = await getH2HRecord(fixture.homeTeamId, fixture.awayTeamId)
 
-  let bestLeg: AccumulatorLeg | null = null
-  let bestScore = 0
+  let bestPick: AccumulatorPick | null = null
+  let bestScore = -1
 
   for (const candidate of CANDIDATE_PICKS) {
     try {
-      const marketFits = config.preferredMarkets.some(m =>
-        candidate.market.toLowerCase().includes(m)
-      )
-      if (!marketFits && tier === 'SAFE') continue
-
-      const odds = estimateOdds(candidate.pick, candidate.market, stats)
-      if (odds < config.minOddsPerLeg || odds > config.maxOddsPerLeg) continue
+      const odds = stats ? estimateOdds(candidate.pick, candidate.market, stats) : 0
+      if (odds < 1.05) continue
 
       const score = await calculateGrooveScore({
         pick: candidate.pick,
         market: candidate.market,
-        odds,
+        odds: odds || 2.0,
         stats,
         h2h,
       })
 
-      if (score.grooveScore < config.minGrooveScore) continue
       if (score.grooveScore <= bestScore) continue
-
       bestScore = score.grooveScore
-      bestLeg = {
+
+      bestPick = {
         fixtureId: fixture.id,
         homeTeam: fixture.homeTeam,
         awayTeam: fixture.awayTeam,
@@ -180,91 +150,70 @@ async function getBestPickForFixture(
         matchDate: fixture.matchDate,
         pick: candidate.pick,
         market: candidate.market,
-        odds,
+        odds: odds || 2.0,
         grooveScore: score.grooveScore,
         confidence: score.confidence,
         riskLevel: score.riskLevel,
         valueEdge: score.valueEdge,
+        probability: score.realProbability > 0 ? score.realProbability : score.impliedProbability,
         reason: '',
+        isRecommended: score.grooveScore >= config.minGrooveScore,
+        dataQuality: score.dataQuality,
       }
     } catch { /* skip */ }
   }
 
-  return bestLeg
-}
-
-// ─── BUILD ACCA COMBINATIONS ──────────────────────────────────────────────
-
-function selectBestAccumulators(
-  legs: AccumulatorLeg[],
-  tier: RiskTier,
-  requestedLegs: number
-): Accumulator[] {
-  const config = TIER_CONFIG[tier]
-  const result: Accumulator[] = []
-  const sorted = [...legs].sort((a, b) => b.grooveScore - a.grooveScore)
-  const sizes = requestedLegs > 0 ? [requestedLegs] : [3, 4, 5, 6, 7, 8]
-
-  for (const size of sizes) {
-    if (sorted.length < size) continue
-
-    for (let offset = 0; offset + size <= Math.min(sorted.length, 15); offset++) {
-      const candidate = sorted.slice(offset, offset + size)
-      const totalOdds = candidate.reduce((acc, l) => acc * l.odds, 1)
-
-      if (totalOdds < config.targetMinOdds || totalOdds > config.targetMaxOdds) continue
-
-      const avgScore = Math.round(candidate.reduce((acc, l) => acc + l.grooveScore, 0) / candidate.length)
-      const avgConf = Math.round(candidate.reduce((acc, l) => acc + l.confidence, 0) / candidate.length)
-
-      result.push({
-        id: `${tier.toLowerCase()}_${size}leg_${offset}`,
-        legs: candidate,
-        totalOdds: parseFloat(totalOdds.toFixed(2)),
-        avgGrooveScore: avgScore,
-        avgConfidence: avgConf,
-        riskTier: tier,
-        legsCount: size,
-        potentialReturn: parseFloat((1000 * totalOdds).toFixed(0)),
-        summary: '',
-      })
-
-      if (result.length >= 5) break
+  // If no picks scored at all, still return a basic entry for the fixture
+  if (!bestPick) {
+    bestPick = {
+      fixtureId: fixture.id,
+      homeTeam: fixture.homeTeam,
+      awayTeam: fixture.awayTeam,
+      league: fixture.league,
+      country: fixture.country,
+      matchDate: fixture.matchDate,
+      pick: 'Home',
+      market: '1X2',
+      odds: 2.0,
+      grooveScore: 50,
+      confidence: 50,
+      riskLevel: 'MEDIUM',
+      valueEdge: 0,
+      probability: 50,
+      reason: 'Insufficient data for analysis',
+      isRecommended: false,
+      dataQuality: 'MINIMAL',
     }
-    if (result.length >= 5) break
   }
 
-  return result
+  return bestPick
 }
 
 // ─── AI REASONS ───────────────────────────────────────────────────────────
 
-async function addAIReasons(accs: Accumulator[]): Promise<Accumulator[]> {
-  if (accs.length === 0) return accs
+async function addAIReasons(picks: AccumulatorPick[]): Promise<AccumulatorPick[]> {
+  if (picks.length === 0) return picks
 
-  const allLegs = accs.flatMap(a => a.legs)
-  const uniqueLegs = allLegs.filter(
-    (l, i, arr) => arr.findIndex(x => x.fixtureId === l.fixtureId && x.pick === l.pick) === i
-  )
+  // Only generate reasons for recommended picks to save tokens
+  const recommended = picks.filter(p => p.isRecommended && p.dataQuality !== 'MINIMAL')
+  if (recommended.length === 0) return picks
 
-  if (uniqueLegs.length === 0) return accs
-
-  const legsDesc = uniqueLegs.map((l, i) =>
-    `${i + 1}. ${l.homeTeam} vs ${l.awayTeam} — ${l.pick} (${l.market}) @ ${l.odds} | Groove Score: ${l.grooveScore}/100 | Edge: ${l.valueEdge > 0 ? '+' : ''}${l.valueEdge}%`
+  const lines = recommended.map((p, i) =>
+    `${i + 1}. ${p.homeTeam} vs ${p.awayTeam} (${p.league}) — ${p.pick} @ ${p.odds} | Groove Score: ${p.grooveScore}/100 | Probability: ${p.probability.toFixed(0)}%`
   ).join('\n')
 
   try {
     const completion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [
-        { role: 'system', content: 'Football betting analyst. Output ONLY valid JSON array.' },
+        { role: 'system', content: 'Football analyst. Output ONLY valid JSON array. No markdown.' },
         {
           role: 'user',
-          content: `Write one specific sentence per pick referencing Groove Score and actual numbers.\n\n${legsDesc}\n\nReturn ONLY: [{"index":0,"reason":"..."}]`,
+          content: `Write one short sentence per pick (max 15 words) referencing Groove Score and probability.\n\n${lines}\n\nReturn ONLY: [{"index":0,"reason":"..."}]`,
         },
       ],
       temperature: 0.15,
-      max_tokens: 60 * uniqueLegs.length,
+      max_tokens: 40 * recommended.length + 50,
     })
 
     const raw = completion.choices[0]?.message?.content || '[]'
@@ -274,48 +223,62 @@ async function addAIReasons(accs: Accumulator[]): Promise<Accumulator[]> {
 
     const parsed = JSON.parse(clean.substring(start, end + 1))
     const reasonMap = new Map<string, string>()
-    uniqueLegs.forEach((l, i) => {
-      reasonMap.set(`${l.fixtureId}:${l.pick}`, parsed[i]?.reason || `Groove Score ${l.grooveScore}/100`)
+    recommended.forEach((p, i) => {
+      reasonMap.set(p.fixtureId, parsed[i]?.reason || `Groove Score ${p.grooveScore}/100 — ${p.probability.toFixed(0)}% probability`)
     })
 
-    return accs.map(acc => ({
-      ...acc,
-      legs: acc.legs.map(l => ({
-        ...l,
-        reason: reasonMap.get(`${l.fixtureId}:${l.pick}`) || `Groove Score ${l.grooveScore}/100`,
-      })),
+    return picks.map(p => ({
+      ...p,
+      reason: reasonMap.get(p.fixtureId) ||
+        (p.dataQuality === 'MINIMAL'
+          ? `Estimated ${p.probability.toFixed(0)}% probability based on market data`
+          : `Groove Score ${p.grooveScore}/100 — ${p.probability.toFixed(0)}% probability`
+        )
     }))
   } catch {
-    return accs.map(acc => ({
-      ...acc,
-      legs: acc.legs.map(l => ({
-        ...l,
-        reason: l.reason || `Groove Score ${l.grooveScore}/100`,
-      })),
+    return picks.map(p => ({
+      ...p,
+      reason: p.reason || `Groove Score ${p.grooveScore}/100 — ${p.probability.toFixed(0)}% probability`
     }))
   }
 }
 
-async function addSummaries(accs: Accumulator[]): Promise<Accumulator[]> {
-  return accs.map(a => ({
-    ...a,
-    summary: a.summary || `${a.legsCount}-leg ${a.riskTier.toLowerCase()} accumulator at ${a.totalOdds} odds. Avg Groove Score ${a.avgGrooveScore}/100. ₦1000 stake returns ₦${a.potentialReturn.toLocaleString()}.`,
-  }))
+// ─── BUILD SUGGESTED ACCUMULATOR FROM RECOMMENDED PICKS ───────────────────
+
+function buildSuggestedAccumulator(
+  recommended: AccumulatorPick[]
+): SuggestedAccumulator | null {
+  if (recommended.length < 2) return null
+
+  // Sort by Groove Score, take top picks
+  const sorted = [...recommended].sort((a, b) => b.grooveScore - a.grooveScore)
+  const legs = sorted.slice(0, Math.min(5, sorted.length))
+
+  const totalOdds = legs.reduce((acc, l) => acc * l.odds, 1)
+  const avgGrooveScore = Math.round(legs.reduce((acc, l) => acc + l.grooveScore, 0) / legs.length)
+
+  return {
+    legs,
+    totalOdds: parseFloat(totalOdds.toFixed(2)),
+    avgGrooveScore,
+    legsCount: legs.length,
+    potentialReturn: parseFloat((1000 * totalOdds).toFixed(0)),
+  }
 }
 
 // ─── SAVE TO DB ───────────────────────────────────────────────────────────
 
-async function saveToDb(userId: string, acc: Accumulator): Promise<void> {
+async function saveToDb(userId: string, suggested: SuggestedAccumulator): Promise<void> {
   try {
     await prisma.accumulatorBuild.create({
       data: {
         userId,
-        targetOdds: acc.totalOdds,
-        actualOdds: acc.totalOdds,
-        riskLevel: acc.riskTier === 'SAFE' ? 'LOW' : acc.riskTier === 'BALANCED' ? 'MEDIUM' : 'HIGH',
-        legsCount: acc.legsCount,
-        avgGrooveScore: acc.avgGrooveScore,
-        picks: acc.legs as unknown as object[],
+        targetOdds: suggested.totalOdds,
+        actualOdds: suggested.totalOdds,
+        riskLevel: suggested.avgGrooveScore >= 72 ? 'LOW' : suggested.avgGrooveScore >= 65 ? 'MEDIUM' : 'HIGH',
+        legsCount: suggested.legsCount,
+        avgGrooveScore: suggested.avgGrooveScore,
+        picks: suggested.legs as unknown as object[],
       },
     })
   } catch { /* non-critical */ }
@@ -334,48 +297,49 @@ export async function buildAccumulators(
     : await getUpcomingFixtures(daysAhead * 24)
 
   if (fixtures.length === 0) {
-    return { accumulators: [], fixturesScanned: 0, summary: 'No fixtures available for accumulator building.' }
+    return {
+      allPicks: [],
+      recommendedPicks: [],
+      suggestedAccumulator: null,
+      fixturesScanned: 0,
+      summary: 'No fixtures available for the selected date range.',
+    }
   }
 
-  const legs: AccumulatorLeg[] = []
+  // Score all fixtures in batches
+  const allPicks: AccumulatorPick[] = []
   const BATCH = 5
 
-  for (let i = 0; i < Math.min(fixtures.length, 30); i += BATCH) {
+  for (let i = 0; i < fixtures.length; i += BATCH) {
     const batch = fixtures.slice(i, i + BATCH)
     const results = await Promise.all(batch.map(f => getBestPickForFixture(f, tier)))
-    legs.push(...results.filter((l): l is AccumulatorLeg => l !== null))
+    allPicks.push(...results.filter((p): p is AccumulatorPick => p !== null))
     await new Promise(r => setTimeout(r, 200))
   }
 
-  if (legs.length < 2) {
-    return {
-      accumulators: [],
-      fixturesScanned: fixtures.length,
-      summary: `Only ${legs.length} qualifying picks found. Try a lower risk tier or check back when more fixtures are available.`,
-    }
+  // Sort: recommended first (by Groove Score), then others (by Groove Score)
+  allPicks.sort((a, b) => {
+    if (a.isRecommended !== b.isRecommended) return a.isRecommended ? -1 : 1
+    return b.grooveScore - a.grooveScore
+  })
+
+  // Add AI reasons for recommended picks
+  const picksWithReasons = await addAIReasons(allPicks)
+
+  const recommendedPicks = picksWithReasons.filter(p => p.isRecommended)
+  const suggestedAccumulator = buildSuggestedAccumulator(recommendedPicks)
+
+  if (userId && suggestedAccumulator) {
+    await saveToDb(userId, suggestedAccumulator)
   }
 
-  let accs = selectBestAccumulators(legs, tier, requestedLegs)
-
-  if (accs.length === 0) {
-    return {
-      accumulators: [],
-      fixturesScanned: fixtures.length,
-      summary: 'Could not build accumulators within target odds range. Try a different risk tier.',
-    }
-  }
-
-  accs = await addAIReasons(accs)
-  accs = await addSummaries(accs)
-
-  if (userId && accs.length > 0) {
-    await saveToDb(userId, accs[0])
-  }
-
-  const summary = `Built ${accs.length} ${tier.toLowerCase()} accumulator${accs.length > 1 ? 's' : ''} from ${fixtures.length} fixtures. Best: ${accs[0]?.legsCount}-leg at ${accs[0]?.totalOdds} odds with avg Groove Score ${accs[0]?.avgGrooveScore}/100.`
+  const config = TIER_CONFIG[tier]
+  const summary = `Found ${allPicks.length} fixtures for your selected range. ${recommendedPicks.length} meet the ${config.label} threshold (Groove Score ${config.minGrooveScore}+).${suggestedAccumulator ? ` Suggested ${suggestedAccumulator.legsCount}-leg accumulator at ${suggestedAccumulator.totalOdds}x odds.` : ''}`
 
   return {
-    accumulators: accs.slice(0, 5),
+    allPicks: picksWithReasons,
+    recommendedPicks,
+    suggestedAccumulator,
     fixturesScanned: fixtures.length,
     summary,
   }
