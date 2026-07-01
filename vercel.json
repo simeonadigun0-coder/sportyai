@@ -4,12 +4,16 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/ingest-fixtures",
+      "schedule": "0 3 * * *"
+    },
+    {
       "path": "/api/cron/daily-pipeline",
-      "schedule": "0 5 * * *"
+      "schedule": "0 4 * * *"
     },
     {
       "path": "/api/cron/settle-value-bet",
-      "schedule": "0 22 * * *"
+      "schedule": "0 21 * * *"
     }
   ]
 }

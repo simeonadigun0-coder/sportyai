@@ -1,9 +1,11 @@
 // pages/api/cron/daily-pipeline.ts
-// Module 9 — Master daily pipeline
-// Runs at 5am — ingests fixtures, stats, value bets in sequence
+// Runs at 4am UTC (5am WAT) daily
+// Fixture ingestion is handled separately by ingest-fixtures cron at 3am UTC
+// This pipeline only runs: stats fetch + value bet scan
 
 import { NextApiRequest, NextApiResponse } from 'next'
-import { runDailyPipeline } from '@/lib/engine'
+import { fetchStatisticsForUpcomingFixtures } from '@/lib/statistics'
+import { scanForValueBets } from '@/lib/value-bet-engine'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const authHeader = req.headers.authorization
@@ -14,11 +16,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
+  const start = Date.now()
+
   try {
-    const result = await runDailyPipeline()
+    console.log('[daily-pipeline] Starting stats + value bet scan...')
+
+    // Step 1: Fetch BSD stats for all upcoming fixtures
+    const statsResult = await fetchStatisticsForUpcomingFixtures()
+    console.log(`[daily-pipeline] Stats: ${statsResult.success} success, ${statsResult.failed} failed`)
+
+    // Step 2: Scan for value bets using fresh stats
+    const valueBetResult = await scanForValueBets(3.5, 1)
+    console.log(`[daily-pipeline] Value bets: ${valueBetResult.total} found`)
+
+    const duration = Date.now() - start
+
     return res.status(200).json({
       success: true,
-      ...result,
+      statistics: {
+        total: statsResult.total,
+        success: statsResult.success,
+        failed: statsResult.failed,
+      },
+      valueBets: {
+        total: valueBetResult.total,
+        fixturesScanned: valueBetResult.fixturesScanned,
+      },
+      duration,
       timestamp: new Date().toISOString(),
     })
   } catch (err) {
