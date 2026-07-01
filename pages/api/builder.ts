@@ -1,6 +1,6 @@
 // pages/api/builder.ts
 // Module 8 — Accumulator Builder API
-// FIXED: Date range now uses WAT-aware fixture query functions
+// FIXED: WAT-aware date range + auto-ingests fixtures if none found in DB
 
 import { NextApiRequest, NextApiResponse } from 'next'
 import { requireAuth } from '@/lib/auth'
@@ -11,6 +11,7 @@ import {
   getTomorrowFixtures,
   getThisWeekFixtures,
   getThisMonthFixtures,
+  ingestFixtures,
 } from '@/lib/fixtures'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -44,28 +45,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const validTiers: RiskTier[] = ['SAFE', 'BALANCED', 'AGGRESSIVE']
   const safeTier: RiskTier = validTiers.includes(tier) ? tier : 'BALANCED'
 
-  // Map dateRange to the correct WAT-aware fixture fetcher
-  let fixtures
-  try {
+  // How many days ahead to ingest if DB is empty for this range
+  const ingestDaysMap: Record<string, number> = {
+    today: 1,
+    tomorrow: 2,
+    week: 7,
+    month: 30,
+  }
+
+  // Fetch fixtures for the selected WAT date range
+  async function fetchFixtures() {
     switch (dateRange) {
-      case 'tomorrow':
-        fixtures = await getTomorrowFixtures()
-        break
-      case 'week':
-        fixtures = await getThisWeekFixtures()
-        break
-      case 'month':
-        fixtures = await getThisMonthFixtures()
-        break
-      default:
-        fixtures = await getTodayFixtures()
+      case 'tomorrow': return getTomorrowFixtures()
+      case 'week':     return getThisWeekFixtures()
+      case 'month':    return getThisMonthFixtures()
+      default:         return getTodayFixtures()
     }
-  } catch (err) {
-    console.error('[api/builder] fixture fetch failed:', err)
-    return res.status(500).json({ error: 'Failed to fetch fixtures' })
   }
 
   try {
+    let fixtures = await fetchFixtures()
+
+    // Auto-ingest if DB has no fixtures for this date range
+    // This handles cases where the daily cron hasn't run yet
+    if (fixtures.length === 0) {
+      console.log(`[api/builder] No fixtures in DB for "${dateRange}" — auto-ingesting from BSD...`)
+      await ingestFixtures(ingestDaysMap[dateRange] || 2)
+      fixtures = await fetchFixtures()
+    }
+
     const result = await buildAccumulators(safeTier, 0, 1, user.id, fixtures)
     return res.status(200).json(result)
   } catch (err) {
