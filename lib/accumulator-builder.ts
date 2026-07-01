@@ -244,13 +244,18 @@ export async function buildAccumulators(
   tier: RiskTier = 'BALANCED',
   requestedLegs: number = 0,
   daysAhead: number = 1,
-  userId?: string
+  userId?: string,
+  preloadedFixtures?: Awaited<ReturnType<typeof getTodayFixtures>>
 ): Promise<AccumulatorBuilderResult> {
   const config = TIER_CONFIG[tier]
 
-  const fixtures = daysAhead <= 1
-    ? await getTodayFixtures()
-    : await getUpcomingFixtures(daysAhead * 24)
+  // Use pre-fetched fixtures if provided (from WAT-aware API route)
+  // Otherwise fall back to default today fetch
+  const fixtures = preloadedFixtures ?? (
+    daysAhead <= 1
+      ? await getTodayFixtures()
+      : await getUpcomingFixtures(daysAhead * 24)
+  )
 
   if (fixtures.length === 0) {
     return {

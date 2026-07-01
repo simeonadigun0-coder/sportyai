@@ -1,8 +1,7 @@
 // lib/statistics.ts
 // Module 3 — Statistics Service
-// REWRITTEN: Uses BSD v2 API by event ID — no more team-name search
-// Fixtures now carry real BSD event IDs (from fixtures.ts), so we fetch
-// prediction, h2h, and odds directly via /events/{id}/... endpoints
+// FIXED: BSD sends prob_home/prob_draw/prob_away as percentages (e.g. 63.5 = 63.5%)
+// Removed erroneous * 100 multiplication that was causing 6350% display bugs
 
 import { prisma } from './db/prisma'
 
@@ -26,7 +25,7 @@ interface BSDPrediction {
   id: number
   markets: {
     match_result: {
-      prob_home: number
+      prob_home: number   // already a percentage e.g. 63.5 means 63.5%
       prob_draw: number
       prob_away: number
       predicted: string
@@ -36,12 +35,12 @@ interface BSDPrediction {
       away: number
     }
     over_under: {
-      prob_over_15: number
+      prob_over_15: number  // decimal e.g. 0.75 means 75%
       prob_over_25: number
       prob_over_35: number
     }
     btts: {
-      prob_yes: number | null
+      prob_yes: number | null  // decimal e.g. 0.60 means 60%
     }
     score: {
       most_likely: string
@@ -77,62 +76,6 @@ interface BSDOddsComparison {
   }
 }
 
-interface BSDUnavailablePlayers {
-  home: Array<{ id: number; name: string; status: string }>
-  away: Array<{ id: number; name: string; status: string }>
-}
-
-// ─── FETCH EVENT DETAIL (includes head_to_head) ─────────────────────────────
-
-async function fetchEventDetail(bsdEventId: string): Promise<BSDEventDetail | null> {
-  try {
-    const res = await withTimeout(
-      fetch(`${BSD_V2_BASE}/events/${bsdEventId}/`, { headers: bsdHeaders, signal: AbortSignal.timeout(7000) }),
-      7000,
-      null as unknown as Response
-    )
-    if (!res || !res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-// ─── FETCH PREDICTION ────────────────────────────────────────────────────────
-
-async function fetchPrediction(bsdEventId: string): Promise<BSDPrediction | null> {
-  try {
-    const res = await withTimeout(
-      fetch(`${BSD_V2_BASE}/events/${bsdEventId}/prediction/`, { headers: bsdHeaders, signal: AbortSignal.timeout(7000) }),
-      7000,
-      null as unknown as Response
-    )
-    if (!res || !res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-// ─── FETCH ODDS COMPARISON ───────────────────────────────────────────────────
-
-async function fetchOdds(bsdEventId: string): Promise<BSDOddsComparison | null> {
-  try {
-    const res = await withTimeout(
-      fetch(`${BSD_V2_BASE}/events/${bsdEventId}/odds/comparison/`, { headers: bsdHeaders, signal: AbortSignal.timeout(7000) }),
-      7000,
-      null as unknown as Response
-    )
-    if (!res || !res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-// ─── FETCH TEAM FIXTURES FOR FORM CALCULATION ───────────────────────────────
-// Uses /teams/{id}/fixtures/ to get last 5 finished matches for form string
-
 interface BSDTeamFixture {
   id: number
   home_team_id: number
@@ -143,6 +86,47 @@ interface BSDTeamFixture {
   event_date: string
 }
 
+// ─── FETCH EVENT DETAIL ──────────────────────────────────────────────────────
+
+async function fetchEventDetail(bsdEventId: string): Promise<BSDEventDetail | null> {
+  try {
+    const res = await withTimeout(
+      fetch(`${BSD_V2_BASE}/events/${bsdEventId}/`, { headers: bsdHeaders, signal: AbortSignal.timeout(7000) }),
+      7000, null as unknown as Response
+    )
+    if (!res || !res.ok) return null
+    return await res.json()
+  } catch { return null }
+}
+
+// ─── FETCH PREDICTION ────────────────────────────────────────────────────────
+
+async function fetchPrediction(bsdEventId: string): Promise<BSDPrediction | null> {
+  try {
+    const res = await withTimeout(
+      fetch(`${BSD_V2_BASE}/events/${bsdEventId}/prediction/`, { headers: bsdHeaders, signal: AbortSignal.timeout(7000) }),
+      7000, null as unknown as Response
+    )
+    if (!res || !res.ok) return null
+    return await res.json()
+  } catch { return null }
+}
+
+// ─── FETCH ODDS COMPARISON ───────────────────────────────────────────────────
+
+async function fetchOdds(bsdEventId: string): Promise<BSDOddsComparison | null> {
+  try {
+    const res = await withTimeout(
+      fetch(`${BSD_V2_BASE}/events/${bsdEventId}/odds/comparison/`, { headers: bsdHeaders, signal: AbortSignal.timeout(7000) }),
+      7000, null as unknown as Response
+    )
+    if (!res || !res.ok) return null
+    return await res.json()
+  } catch { return null }
+}
+
+// ─── FETCH TEAM FORM ─────────────────────────────────────────────────────────
+
 async function fetchTeamForm(teamId: string): Promise<{
   formString: string
   wins: number
@@ -152,21 +136,16 @@ async function fetchTeamForm(teamId: string): Promise<{
   goalsConceded: number
 }> {
   const empty = { formString: '', wins: 0, draws: 0, losses: 0, goalsScored: 0, goalsConceded: 0 }
-
   try {
     const dateTo = new Date().toISOString().split('T')[0]
     const dateFrom = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-
     const res = await withTimeout(
       fetch(`${BSD_V2_BASE}/teams/${teamId}/fixtures/?date_from=${dateFrom}&date_to=${dateTo}&status=finished&limit=10`, {
-        headers: bsdHeaders,
-        signal: AbortSignal.timeout(7000),
+        headers: bsdHeaders, signal: AbortSignal.timeout(7000),
       }),
-      7000,
-      null as unknown as Response
+      7000, null as unknown as Response
     )
     if (!res || !res.ok) return empty
-
     const data = await res.json()
     const fixtures: BSDTeamFixture[] = (data.results || []).slice(0, 5)
 
@@ -177,24 +156,16 @@ async function fetchTeamForm(teamId: string): Promise<{
       const isHome = String(f.home_team_id) === teamId
       const myScore = isHome ? f.home_score : f.away_score
       const oppScore = isHome ? f.away_score : f.home_score
-
       if (myScore === null || oppScore === null) continue
-
       goalsScored += myScore
       goalsConceded += oppScore
-
       if (myScore > oppScore) { wins++; formChars.push('W') }
       else if (myScore < oppScore) { losses++; formChars.push('L') }
       else { draws++; formChars.push('D') }
     }
 
-    return {
-      formString: formChars.join(''),
-      wins, draws, losses, goalsScored, goalsConceded,
-    }
-  } catch {
-    return empty
-  }
+    return { formString: formChars.join(''), wins, draws, losses, goalsScored, goalsConceded }
+  } catch { return empty }
 }
 
 // ─── MAIN STATS FETCH AND STORE ──────────────────────────────────────────────
@@ -214,16 +185,16 @@ export async function fetchAndStoreStatistics(
       fetchTeamForm(awayTeamId),
     ])
 
-    if (!prediction && !homeForm.formString && !awayForm.formString) {
-      console.log(`[statistics] No BSD data available for event ${bsdEventId}`)
+    // Bail if no prediction data — don't write zero rows
+    if (!prediction) {
+      console.log(`[statistics] No BSD prediction data for event ${bsdEventId}`)
       return false
     }
 
     const h2h = eventDetail?.head_to_head
-
-    const matchResult = prediction?.markets?.match_result
-    const overUnder = prediction?.markets?.over_under
-    const btts = prediction?.markets?.btts
+    const matchResult = prediction.markets?.match_result
+    const overUnder = prediction.markets?.over_under
+    const btts = prediction.markets?.btts
 
     const homeGames = homeForm.wins + homeForm.draws + homeForm.losses || 1
     const awayGames = awayForm.wins + awayForm.draws + awayForm.losses || 1
@@ -232,109 +203,75 @@ export async function fetchAndStoreStatistics(
     const oddsDraw = odds?.match_winner?.draw || null
     const oddsAway = odds?.match_winner?.away || null
 
+    // FIX: BSD sends prob_home/draw/away as percentages (e.g. 63.5 = 63.5%)
+    // Do NOT multiply by 100 — store as-is
+    const probHome = matchResult ? parseFloat(matchResult.prob_home.toFixed(1)) : 0
+    const probDraw = matchResult ? parseFloat(matchResult.prob_draw.toFixed(1)) : 0
+    const probAway = matchResult ? parseFloat(matchResult.prob_away.toFixed(1)) : 0
+
+    // over/under and btts rates come as decimals (0.75 = 75%) — store as decimals for confidence.ts
+    const over15Rate = overUnder ? overUnder.prob_over_15 : 0
+    const over25Rate = overUnder ? overUnder.prob_over_25 : 0
+    const bttsRate = btts?.prob_yes ?? 0
+
+    const data = {
+      homeFormString: homeForm.formString || null,
+      homeWins: homeForm.wins,
+      homeDraws: homeForm.draws,
+      homeLosses: homeForm.losses,
+      homeGoalsScored: homeForm.goalsScored,
+      homeGoalsConceded: homeForm.goalsConceded,
+      homeAvgScored: parseFloat((homeForm.goalsScored / homeGames).toFixed(2)),
+      homeAvgConceded: parseFloat((homeForm.goalsConceded / homeGames).toFixed(2)),
+      awayFormString: awayForm.formString || null,
+      awayWins: awayForm.wins,
+      awayDraws: awayForm.draws,
+      awayLosses: awayForm.losses,
+      awayGoalsScored: awayForm.goalsScored,
+      awayGoalsConceded: awayForm.goalsConceded,
+      awayAvgScored: parseFloat((awayForm.goalsScored / awayGames).toFixed(2)),
+      awayAvgConceded: parseFloat((awayForm.goalsConceded / awayGames).toFixed(2)),
+      probHome,
+      probDraw,
+      probAway,
+      predictedResult: matchResult?.predicted || null,
+      over15Rate,
+      over25Rate,
+      bttsRate,
+      xGHome: prediction.markets?.expected_goals?.home ?? null,
+      xGAway: prediction.markets?.expected_goals?.away ?? null,
+      homeInjuredCount: 0,
+      awayInjuredCount: 0,
+      oddsHome,
+      oddsDraw,
+      oddsAway,
+      dataSource: 'BSD_V2',
+      updatedAt: new Date(),
+    }
+
     await prisma.matchStatistics.upsert({
       where: { fixtureId: fixtureDbId },
-      update: {
-        homeFormString: homeForm.formString || null,
-        homeWins: homeForm.wins,
-        homeDraws: homeForm.draws,
-        homeLosses: homeForm.losses,
-        homeGoalsScored: homeForm.goalsScored,
-        homeGoalsConceded: homeForm.goalsConceded,
-        homeAvgScored: parseFloat((homeForm.goalsScored / homeGames).toFixed(2)),
-        homeAvgConceded: parseFloat((homeForm.goalsConceded / homeGames).toFixed(2)),
-        awayFormString: awayForm.formString || null,
-        awayWins: awayForm.wins,
-        awayDraws: awayForm.draws,
-        awayLosses: awayForm.losses,
-        awayGoalsScored: awayForm.goalsScored,
-        awayGoalsConceded: awayForm.goalsConceded,
-        awayAvgScored: parseFloat((awayForm.goalsScored / awayGames).toFixed(2)),
-        awayAvgConceded: parseFloat((awayForm.goalsConceded / awayGames).toFixed(2)),
-        probHome: matchResult ? Math.round(matchResult.prob_home * 100) : 0,
-        probDraw: matchResult ? Math.round(matchResult.prob_draw * 100) : 0,
-        probAway: matchResult ? Math.round(matchResult.prob_away * 100) : 0,
-        predictedResult: matchResult?.predicted || null,
-        over15Rate: overUnder ? overUnder.prob_over_15 : 0,
-        over25Rate: overUnder ? overUnder.prob_over_25 : 0,
-        bttsRate: btts?.prob_yes !== null && btts?.prob_yes !== undefined ? btts.prob_yes : 0,
-        xGHome: prediction?.markets?.expected_goals?.home ?? null,
-        xGAway: prediction?.markets?.expected_goals?.away ?? null,
-        homeInjuredCount: 0,
-        awayInjuredCount: 0,
-        oddsHome,
-        oddsDraw,
-        oddsAway,
-        dataSource: 'BSD_V2',
-        updatedAt: new Date(),
-      },
-      create: {
-        fixtureId: fixtureDbId,
-        homeFormString: homeForm.formString || null,
-        homeWins: homeForm.wins,
-        homeDraws: homeForm.draws,
-        homeLosses: homeForm.losses,
-        homeGoalsScored: homeForm.goalsScored,
-        homeGoalsConceded: homeForm.goalsConceded,
-        homeAvgScored: parseFloat((homeForm.goalsScored / homeGames).toFixed(2)),
-        homeAvgConceded: parseFloat((homeForm.goalsConceded / homeGames).toFixed(2)),
-        awayFormString: awayForm.formString || null,
-        awayWins: awayForm.wins,
-        awayDraws: awayForm.draws,
-        awayLosses: awayForm.losses,
-        awayGoalsScored: awayForm.goalsScored,
-        awayGoalsConceded: awayForm.goalsConceded,
-        awayAvgScored: parseFloat((awayForm.goalsScored / awayGames).toFixed(2)),
-        awayAvgConceded: parseFloat((awayForm.goalsConceded / awayGames).toFixed(2)),
-        probHome: matchResult ? Math.round(matchResult.prob_home * 100) : 0,
-        probDraw: matchResult ? Math.round(matchResult.prob_draw * 100) : 0,
-        probAway: matchResult ? Math.round(matchResult.prob_away * 100) : 0,
-        predictedResult: matchResult?.predicted || null,
-        over15Rate: overUnder ? overUnder.prob_over_15 : 0,
-        over25Rate: overUnder ? overUnder.prob_over_25 : 0,
-        bttsRate: btts?.prob_yes !== null && btts?.prob_yes !== undefined ? btts.prob_yes : 0,
-        xGHome: prediction?.markets?.expected_goals?.home ?? null,
-        xGAway: prediction?.markets?.expected_goals?.away ?? null,
-        homeInjuredCount: 0,
-        awayInjuredCount: 0,
-        oddsHome,
-        oddsDraw,
-        oddsAway,
-        dataSource: 'BSD_V2',
-      },
+      update: data,
+      create: { fixtureId: fixtureDbId, ...data },
     })
 
-    // Upsert H2H record if BSD has data for it
     if (h2h && h2h.total_matches > 0) {
+      const h2hData = {
+        totalMeetings: h2h.total_matches,
+        homeWins: h2h.home_wins,
+        awayWins: h2h.away_wins,
+        draws: h2h.draws,
+        totalGoals: h2h.home_goals + h2h.away_goals,
+        avgGoalsPerGame: h2h.avg_total_goals,
+        homeWinRate: h2h.home_win_rate,
+        awayWinRate: h2h.away_win_rate,
+        drawRate: h2h.total_matches > 0 ? parseFloat((h2h.draws / h2h.total_matches).toFixed(2)) : 0,
+        updatedAt: new Date(),
+      }
       await prisma.h2HRecord.upsert({
-        where: {
-          homeTeamId_awayTeamId: { homeTeamId, awayTeamId },
-        },
-        update: {
-          totalMeetings: h2h.total_matches,
-          homeWins: h2h.home_wins,
-          awayWins: h2h.away_wins,
-          draws: h2h.draws,
-          totalGoals: h2h.home_goals + h2h.away_goals,
-          avgGoalsPerGame: h2h.avg_total_goals,
-          homeWinRate: h2h.home_win_rate,
-          awayWinRate: h2h.away_win_rate,
-          drawRate: h2h.total_matches > 0 ? parseFloat((h2h.draws / h2h.total_matches).toFixed(2)) : 0,
-          updatedAt: new Date(),
-        },
-        create: {
-          homeTeamId,
-          awayTeamId,
-          totalMeetings: h2h.total_matches,
-          homeWins: h2h.home_wins,
-          awayWins: h2h.away_wins,
-          draws: h2h.draws,
-          totalGoals: h2h.home_goals + h2h.away_goals,
-          avgGoalsPerGame: h2h.avg_total_goals,
-          homeWinRate: h2h.home_win_rate,
-          awayWinRate: h2h.away_win_rate,
-          drawRate: h2h.total_matches > 0 ? parseFloat((h2h.draws / h2h.total_matches).toFixed(2)) : 0,
-        },
+        where: { homeTeamId_awayTeamId: { homeTeamId, awayTeamId } },
+        update: h2hData,
+        create: { homeTeamId, awayTeamId, ...h2hData },
       })
     }
 
@@ -368,14 +305,8 @@ export async function fetchStatisticsForUpcomingFixtures(): Promise<{
   let failed = 0
 
   for (const fixture of fixtures) {
-    // BSD-sourced fixtures have numeric fixtureId; ESPN ones are prefixed "espn_"
     const isBSDFixture = !fixture.fixtureId.startsWith('espn_')
-
-    if (!isBSDFixture) {
-      // Can't fetch v2 stats for ESPN-sourced fixtures — no BSD event ID
-      failed++
-      continue
-    }
+    if (!isBSDFixture) { failed++; continue }
 
     const ok = await fetchAndStoreStatistics(
       fixture.id,
@@ -385,7 +316,6 @@ export async function fetchStatisticsForUpcomingFixtures(): Promise<{
     )
     if (ok) success++
     else failed++
-
     await new Promise(r => setTimeout(r, 250))
   }
 
@@ -396,23 +326,16 @@ export async function fetchStatisticsForUpcomingFixtures(): Promise<{
 // ─── GET STATS FOR A FIXTURE ──────────────────────────────────────────────────
 
 export async function getStatisticsForFixture(fixtureId: string) {
-  return prisma.matchStatistics.findUnique({
-    where: { fixtureId },
-  })
+  return prisma.matchStatistics.findUnique({ where: { fixtureId } })
 }
 
 export async function getH2HRecord(homeTeamId: string, awayTeamId: string) {
   return prisma.h2HRecord.findUnique({
-    where: {
-      homeTeamId_awayTeamId: { homeTeamId, awayTeamId },
-    },
+    where: { homeTeamId_awayTeamId: { homeTeamId, awayTeamId } },
   })
 }
 
 // ─── TEAM-NAME SEARCH FALLBACK ───────────────────────────────────────────────
-// Used by slip-optimizer.ts — analyses SportyBet games which have no
-// relationship to BSD event IDs. Searches BSD's v2 events list by team_name
-// to find the matching fixture, then fetches prediction/h2h/odds by that ID.
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -427,27 +350,20 @@ async function findBSDEventIdByTeams(homeTeam: string, awayTeam: string): Promis
   try {
     const yesterday = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0]
     const next2w = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
-
     const searchTerms = [homeTeam, homeTeam.split(' ')[0], awayTeam]
 
     for (const term of searchTerms) {
       const res = await withTimeout(
-        fetch(
-          `${BSD_V2_BASE}/events/?team_name=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${next2w}&limit=20`,
-          { headers: bsdHeaders, signal: AbortSignal.timeout(6000) }
-        ),
-        6000,
-        null as unknown as Response
+        fetch(`${BSD_V2_BASE}/events/?team_name=${encodeURIComponent(term)}&date_from=${yesterday}&date_to=${next2w}&limit=20`,
+          { headers: bsdHeaders, signal: AbortSignal.timeout(6000) }),
+        6000, null as unknown as Response
       )
       if (!res || !res.ok) continue
-
       const data = await res.json()
       const events = data.results || []
-
       const match = events.find((e: { home_team?: string; away_team?: string }) =>
         teamsMatch(e.home_team || '', e.away_team || '', homeTeam, awayTeam)
       )
-
       if (match) return String(match.id)
     }
   } catch (err) {
@@ -464,15 +380,11 @@ export async function fetchStatsByTeamSearch(
   awayTeamId: string
 ): Promise<boolean> {
   const bsdEventId = await findBSDEventIdByTeams(homeTeam, awayTeam)
-
   if (!bsdEventId) {
     console.log(`[statistics] No BSD event found for ${homeTeam} vs ${awayTeam}`)
     return false
   }
 
-  // Found the real BSD event ID — reuse the same ID-based fetch logic,
-  // but store H2H under the SportyBet-derived team IDs so the optimizer
-  // can look it up the same way it looks up stats
   const [eventDetail, prediction, odds] = await Promise.all([
     fetchEventDetail(bsdEventId),
     fetchPrediction(bsdEventId),
@@ -493,70 +405,54 @@ export async function fetchStatsByTeamSearch(
   const oddsDraw = odds?.match_winner?.draw || null
   const oddsAway = odds?.match_winner?.away || null
 
+  // FIX: BSD sends prob_home/draw/away as percentages — do NOT multiply by 100
+  const probHome = matchResult ? parseFloat(matchResult.prob_home.toFixed(1)) : 0
+  const probDraw = matchResult ? parseFloat(matchResult.prob_draw.toFixed(1)) : 0
+  const probAway = matchResult ? parseFloat(matchResult.prob_away.toFixed(1)) : 0
+
   try {
+    const data = {
+      probHome,
+      probDraw,
+      probAway,
+      predictedResult: matchResult?.predicted || null,
+      over15Rate: overUnder ? overUnder.prob_over_15 : 0,
+      over25Rate: overUnder ? overUnder.prob_over_25 : 0,
+      bttsRate: btts?.prob_yes ?? 0,
+      xGHome: prediction.markets?.expected_goals?.home ?? null,
+      xGAway: prediction.markets?.expected_goals?.away ?? null,
+      oddsHome, oddsDraw, oddsAway,
+      dataSource: 'BSD_V2_TEAMSEARCH',
+      updatedAt: new Date(),
+    }
+
     await prisma.matchStatistics.upsert({
       where: { fixtureId: fixtureDbId },
-      update: {
-        probHome: matchResult ? Math.round(matchResult.prob_home * 100) : 0,
-        probDraw: matchResult ? Math.round(matchResult.prob_draw * 100) : 0,
-        probAway: matchResult ? Math.round(matchResult.prob_away * 100) : 0,
-        predictedResult: matchResult?.predicted || null,
-        over15Rate: overUnder ? overUnder.prob_over_15 : 0,
-        over25Rate: overUnder ? overUnder.prob_over_25 : 0,
-        bttsRate: btts?.prob_yes ?? 0,
-        xGHome: prediction.markets?.expected_goals?.home ?? null,
-        xGAway: prediction.markets?.expected_goals?.away ?? null,
-        oddsHome, oddsDraw, oddsAway,
-        dataSource: 'BSD_V2_TEAMSEARCH',
-        updatedAt: new Date(),
-      },
-      create: {
-        fixtureId: fixtureDbId,
-        probHome: matchResult ? Math.round(matchResult.prob_home * 100) : 0,
-        probDraw: matchResult ? Math.round(matchResult.prob_draw * 100) : 0,
-        probAway: matchResult ? Math.round(matchResult.prob_away * 100) : 0,
-        predictedResult: matchResult?.predicted || null,
-        over15Rate: overUnder ? overUnder.prob_over_15 : 0,
-        over25Rate: overUnder ? overUnder.prob_over_25 : 0,
-        bttsRate: btts?.prob_yes ?? 0,
-        xGHome: prediction.markets?.expected_goals?.home ?? null,
-        xGAway: prediction.markets?.expected_goals?.away ?? null,
-        oddsHome, oddsDraw, oddsAway,
-        dataSource: 'BSD_V2_TEAMSEARCH',
-      },
+      update: data,
+      create: { fixtureId: fixtureDbId, ...data },
     })
 
     if (h2h && h2h.total_matches > 0) {
+      const h2hData = {
+        totalMeetings: h2h.total_matches,
+        homeWins: h2h.home_wins,
+        awayWins: h2h.away_wins,
+        draws: h2h.draws,
+        totalGoals: h2h.home_goals + h2h.away_goals,
+        avgGoalsPerGame: h2h.avg_total_goals,
+        homeWinRate: h2h.home_win_rate,
+        awayWinRate: h2h.away_win_rate,
+        drawRate: h2h.total_matches > 0 ? parseFloat((h2h.draws / h2h.total_matches).toFixed(2)) : 0,
+        updatedAt: new Date(),
+      }
       await prisma.h2HRecord.upsert({
         where: { homeTeamId_awayTeamId: { homeTeamId, awayTeamId } },
-        update: {
-          totalMeetings: h2h.total_matches,
-          homeWins: h2h.home_wins,
-          awayWins: h2h.away_wins,
-          draws: h2h.draws,
-          totalGoals: h2h.home_goals + h2h.away_goals,
-          avgGoalsPerGame: h2h.avg_total_goals,
-          homeWinRate: h2h.home_win_rate,
-          awayWinRate: h2h.away_win_rate,
-          drawRate: h2h.total_matches > 0 ? parseFloat((h2h.draws / h2h.total_matches).toFixed(2)) : 0,
-          updatedAt: new Date(),
-        },
-        create: {
-          homeTeamId, awayTeamId,
-          totalMeetings: h2h.total_matches,
-          homeWins: h2h.home_wins,
-          awayWins: h2h.away_wins,
-          draws: h2h.draws,
-          totalGoals: h2h.home_goals + h2h.away_goals,
-          avgGoalsPerGame: h2h.avg_total_goals,
-          homeWinRate: h2h.home_win_rate,
-          awayWinRate: h2h.away_win_rate,
-          drawRate: h2h.total_matches > 0 ? parseFloat((h2h.draws / h2h.total_matches).toFixed(2)) : 0,
-        },
+        update: h2hData,
+        create: { homeTeamId, awayTeamId, ...h2hData },
       })
     }
 
-    console.log(`[statistics] ✅ Stored team-search stats for ${homeTeam} vs ${awayTeam} (BSD event ${bsdEventId})`)
+    console.log(`[statistics] ✅ Stored team-search stats for ${homeTeam} vs ${awayTeam}`)
     return true
   } catch (err) {
     console.error('[statistics] Failed to store team-search stats:', err)

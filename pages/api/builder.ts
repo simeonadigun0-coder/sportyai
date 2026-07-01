@@ -1,11 +1,17 @@
 // pages/api/builder.ts
 // Module 8 — Accumulator Builder API
-// Replaces old builder logic with new engine
+// FIXED: Date range now uses WAT-aware fixture query functions
 
 import { NextApiRequest, NextApiResponse } from 'next'
 import { requireAuth } from '@/lib/auth'
 import { findUserByEmail, isSubscriptionActive } from '@/lib/users'
 import { buildAccumulators, RiskTier } from '@/lib/accumulator-builder'
+import {
+  getTodayFixtures,
+  getTomorrowFixtures,
+  getThisWeekFixtures,
+  getThisMonthFixtures,
+} from '@/lib/fixtures'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -29,25 +35,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const {
     tier = 'BALANCED',
-    legs = 0,
-    daysAhead = 1,
+    dateRange = 'today',
   } = req.body as {
     tier?: RiskTier
-    legs?: number
-    daysAhead?: number
+    dateRange?: 'today' | 'tomorrow' | 'week' | 'month'
   }
 
   const validTiers: RiskTier[] = ['SAFE', 'BALANCED', 'AGGRESSIVE']
   const safeTier: RiskTier = validTiers.includes(tier) ? tier : 'BALANCED'
 
+  // Map dateRange to the correct WAT-aware fixture fetcher
+  let fixtures
   try {
-    const result = await buildAccumulators(
-      safeTier,
-      legs,
-      daysAhead,
-      user.id
-    )
+    switch (dateRange) {
+      case 'tomorrow':
+        fixtures = await getTomorrowFixtures()
+        break
+      case 'week':
+        fixtures = await getThisWeekFixtures()
+        break
+      case 'month':
+        fixtures = await getThisMonthFixtures()
+        break
+      default:
+        fixtures = await getTodayFixtures()
+    }
+  } catch (err) {
+    console.error('[api/builder] fixture fetch failed:', err)
+    return res.status(500).json({ error: 'Failed to fetch fixtures' })
+  }
 
+  try {
+    const result = await buildAccumulators(safeTier, 0, 1, user.id, fixtures)
     return res.status(200).json(result)
   } catch (err) {
     console.error('[api/builder]', err)
