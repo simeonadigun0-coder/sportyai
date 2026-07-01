@@ -82,7 +82,8 @@ function grooveScoreEmoji(score: number, decision?: 'KEEP' | 'REMOVE'): string {
   if (score >= 60) return '🟡'
   return '🔴'
 }
-function grooveScoreLabel(score: number, decision?: 'KEEP' | 'REMOVE'): string {
+function grooveScoreLabel(score: number, decision?: 'KEEP' | 'REMOVE', dataQuality?: string): string {
+  if (dataQuality === 'MINIMAL') return decision === 'KEEP' ? 'EST·PASS' : decision === 'REMOVE' ? 'EST·FAIL' : 'EST'
   if (decision === 'KEEP') return 'PASS'
   if (decision === 'REMOVE') return 'FAIL'
   if (score >= 80) return 'STRONG'
@@ -91,25 +92,31 @@ function grooveScoreLabel(score: number, decision?: 'KEEP' | 'REMOVE'): string {
   if (score >= 50) return 'WEAK'
   return 'POOR'
 }
-function GrooveScoreBadge({ score, size = 'normal', decision }: { score: number; size?: 'small' | 'normal'; decision?: 'KEEP' | 'REMOVE' }) {
+function GrooveScoreBadge({ score, size = 'normal', decision, dataQuality }: { score: number; size?: 'small' | 'normal'; decision?: 'KEEP' | 'REMOVE'; dataQuality?: string }) {
   const isSmall = size === 'small'
-  const color = grooveScoreColor(score, decision)
-  const bg = grooveScoreBg(score, decision)
+  const color = dataQuality === 'MINIMAL'
+    ? (decision === 'KEEP' ? '#16a34a' : decision === 'REMOVE' ? '#dc2626' : '#94a3b8')
+    : grooveScoreColor(score, decision)
+  const bg = dataQuality === 'MINIMAL'
+    ? (decision === 'KEEP' ? 'rgba(22,163,74,0.06)' : decision === 'REMOVE' ? 'rgba(220,38,38,0.06)' : 'rgba(148,163,184,0.08)')
+    : grooveScoreBg(score, decision)
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: isSmall ? 4 : 6, background: bg, border: `1.5px solid ${color}30`, borderRadius: isSmall ? 6 : 8, padding: isSmall ? '3px 7px' : '4px 10px' }}>
       <span style={{ fontSize: isSmall ? 10 : 12 }}>{grooveScoreEmoji(score, decision)}</span>
-      <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: isSmall ? 12 : 14, color }}>{score}</span>
-      <span style={{ fontSize: isSmall ? 9 : 10, fontWeight: 700, color, opacity: 0.8 }}>{grooveScoreLabel(score, decision)}</span>
+      <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: isSmall ? 12 : 14, color }}>~{score}</span>
+      <span style={{ fontSize: isSmall ? 9 : 10, fontWeight: 700, color, opacity: 0.8 }}>{grooveScoreLabel(score, decision, dataQuality)}</span>
     </div>
   )
 }
-function GrooveScoreBar({ score, decision }: { score: number; decision?: 'KEEP' | 'REMOVE' }) {
-  const color = grooveScoreColor(score, decision)
+function GrooveScoreBar({ score, decision, dataQuality }: { score: number; decision?: 'KEEP' | 'REMOVE'; dataQuality?: string }) {
+  const color = dataQuality === 'MINIMAL'
+    ? (decision === 'KEEP' ? '#16a34a' : decision === 'REMOVE' ? '#dc2626' : '#94a3b8')
+    : grooveScoreColor(score, decision)
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em' }}>GROOVE SCORE</span>
-        <GrooveScoreBadge score={score} size="small" decision={decision} />
+        <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em' }}>{dataQuality === 'MINIMAL' ? 'GROOVE SCORE (EST)' : 'GROOVE SCORE'}</span>
+        <GrooveScoreBadge score={score} size="small" decision={decision} dataQuality={dataQuality} />
       </div>
       <div style={{ height: 5, background: '#f0f4f0', borderRadius: 3, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${score}%`, background: `linear-gradient(90deg, ${color}, ${color}bb)`, borderRadius: 3 }} />
@@ -632,7 +639,7 @@ export default function Dashboard() {
                       </div>
                       <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>{g.league} · Pick: <strong style={{ color: '#0f2010' }}>{g.pick}</strong> ({g.market})</div>
                       {g.grooveScore !== undefined && g.grooveScore > 0 ? (
-                        <GrooveScoreBar score={g.grooveScore} decision="KEEP" />
+                        <GrooveScoreBar score={g.grooveScore} decision="KEEP" dataQuality={g.dataQuality} />
                       ) : (
                         <div style={{ marginBottom: 8 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -670,7 +677,7 @@ export default function Dashboard() {
                           </div>
                         </div>
                         {g.grooveScore !== undefined && g.grooveScore > 0 ? (
-                          <GrooveScoreBar score={g.grooveScore} decision="REMOVE" />
+                          <GrooveScoreBar score={g.grooveScore} decision="REMOVE" dataQuality={g.dataQuality} />
                         ) : (
                           <div style={{ marginBottom: 6 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
